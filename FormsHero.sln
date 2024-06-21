@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30907.101
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FormsHero", "FormsHero\FormsHero.csproj", "{6B7C550C-BB64-497B-95D0-5B3C5161C562}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GHCore", "GHCore\GHCore.csproj", "{E6F91068-85F2-4214-B35C-CC8F2958DC6B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CustomControls", "CustomControls\CustomControls.csproj", "{C9F21814-CE6E-43A9-8402-32E1DF7EA93D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6B7C550C-BB64-497B-95D0-5B3C5161C562}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6B7C550C-BB64-497B-95D0-5B3C5161C562}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6B7C550C-BB64-497B-95D0-5B3C5161C562}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6B7C550C-BB64-497B-95D0-5B3C5161C562}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E6F91068-85F2-4214-B35C-CC8F2958DC6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6F91068-85F2-4214-B35C-CC8F2958DC6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6F91068-85F2-4214-B35C-CC8F2958DC6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6F91068-85F2-4214-B35C-CC8F2958DC6B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C9F21814-CE6E-43A9-8402-32E1DF7EA93D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C9F21814-CE6E-43A9-8402-32E1DF7EA93D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C9F21814-CE6E-43A9-8402-32E1DF7EA93D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C9F21814-CE6E-43A9-8402-32E1DF7EA93D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5554234C-551D-4132-B112-195DFB778A0F}
+	EndGlobalSection
+	GlobalSection(TeamFoundationVersionControl) = preSolution
+		SccNumberOfProjects = 4
+		SccEnterpriseProvider = {4CA58AB2-18FA-4F8D-95D4-32DDF27D184C}
+		SccTeamFoundationServer = https://odairjgn.visualstudio.com/
+		SccLocalPath0 = .
+		SccProjectUniqueName1 = FormsHero\\FormsHero.csproj
+		SccProjectName1 = FormsHero
+		SccLocalPath1 = FormsHero
+		SccProjectUniqueName2 = GHCore\\GHCore.csproj
+		SccProjectName2 = GHCore
+		SccLocalPath2 = GHCore
+		SccProjectUniqueName3 = CustomControls\\CustomControls.csproj
+		SccProjectName3 = CustomControls
+		SccLocalPath3 = CustomControls
+	EndGlobalSection
+EndGlobal
