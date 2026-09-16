@@ -19,6 +19,7 @@ describe("GameplayEngine construction", () => {
       multiplier: 1,
       notesHit: 0,
       notesMissed: 0,
+      wrongPresses: 0,
       notesTotal: 2,
       accuracy: 1,
     });
@@ -35,35 +36,32 @@ describe("GameplayEngine.onFretDown — timing judgment", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 2 })]);
     const result = engine.onFretDown(2, 1020);
 
-    expect(result).toEqual({ noteId: 0, fret: 2, judgment: HitJudgment.Perfect, deltaMs: 20, pointsAwarded: 50, combo: 1, multiplier: 1 });
+    expect(result).toEqual({
+      kind: "hit",
+      noteId: 0,
+      fret: 2,
+      judgment: HitJudgment.Perfect,
+      deltaMs: 20,
+      pointsAwarded: 50,
+      combo: 1,
+      multiplier: 1,
+    });
     expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Hit);
     expect(engine.getNotes()[0].judgment).toBe(HitJudgment.Perfect);
   });
 
   it("hits Good and Ok at wider offsets", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
-    expect(engine.onFretDown(0, 1070)?.judgment).toBe(HitJudgment.Good);
+    expect(engine.onFretDown(0, 1070)).toMatchObject({ kind: "hit", judgment: HitJudgment.Good });
 
     const engine2 = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
-    expect(engine2.onFretDown(0, 1140)?.judgment).toBe(HitJudgment.Ok);
-  });
-
-  it("returns null and judges nothing when pressed outside every window", () => {
-    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
-    expect(engine.onFretDown(0, 1500)).toBeNull();
-    expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Pending);
-  });
-
-  it("returns null when the fret has no more pending notes", () => {
-    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
-    engine.onFretDown(0, 1000);
-    expect(engine.onFretDown(0, 1000)).toBeNull();
+    expect(engine2.onFretDown(0, 1140)).toMatchObject({ kind: "hit", judgment: HitJudgment.Ok });
   });
 
   it("judges each fret against its own queue independently", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 }), note({ timeMs: 1000, fret: 4 })]);
 
-    expect(engine.onFretDown(4, 1000)?.fret).toBe(4);
+    expect(engine.onFretDown(4, 1000)).toMatchObject({ kind: "hit", fret: 4 });
     expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Pending); // fret 0 untouched
     expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Hit);
   });
@@ -77,6 +75,51 @@ describe("GameplayEngine.onFretDown — timing judgment", () => {
 
     engine.onFretDown(0, 2010);
     expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Hit);
+  });
+});
+
+describe("GameplayEngine.onFretDown — wrong presses (no strum bar, e.g. a PS2 controller — a stray press is an error)", () => {
+  it("registers a wrong press and breaks combo when there's no note pending on that fret at all", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 }), note({ timeMs: 1000, fret: 1 })]);
+    engine.onFretDown(0, 1000); // combo -> 1
+
+    expect(engine.onFretDown(1, 1000)).toEqual({ kind: "hit", noteId: 1, fret: 1, judgment: HitJudgment.Perfect, deltaMs: 0, pointsAwarded: 50, combo: 2, multiplier: 1 });
+    expect(engine.onFretDown(3, 1000)).toEqual({ kind: "wrongPress", fret: 3 }); // fret 3 has no notes at all
+    expect(engine.getStats().combo).toBe(0);
+    expect(engine.getStats().wrongPresses).toBe(1);
+  });
+
+  it("registers a wrong press when the nearest pending note's offset is outside every window", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
+    engine.onFretDown(0, 2000); // way outside all windows — must be pressed to trigger since nothing else on this fret matches
+
+    expect(engine.onFretDown(0, 2000)).toEqual({ kind: "wrongPress", fret: 0 });
+  });
+
+  it("leaves the actual chart note untouched — a wrong press doesn't consume it", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
+
+    engine.onFretDown(0, 1500); // outside every window -> wrong press, note not yet due
+    expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Pending);
+    expect(engine.getStats().wrongPresses).toBe(1);
+
+    // the note can still be hit correctly afterward
+    expect(engine.onFretDown(0, 1000)).toMatchObject({ kind: "hit" });
+  });
+
+  it("counts wrong presses in accuracy the same as a missed note", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
+    engine.onFretDown(1, 1000); // fret 1 has no note at all -> wrong press
+
+    expect(engine.getStats().accuracy).toBe(0); // 0 hits / (0 hits + 0 missed + 1 wrong press)
+  });
+
+  it("returns null (not a wrong press) for a repeat on a fret already holding a sustain", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0, sustainMs: 2000 }), note({ timeMs: 1500, fret: 0 })]);
+    engine.onFretDown(0, 1000);
+
+    expect(engine.onFretDown(0, 1500)).toBeNull();
+    expect(engine.getStats().wrongPresses).toBe(0);
   });
 });
 
@@ -107,15 +150,14 @@ describe("GameplayEngine — combo, multiplier and score", () => {
     expect(engine.getStats().combo).toBe(9);
     expect(engine.getStats().multiplier).toBe(1);
 
-    const tenthHit = engine.onFretDown(0, 10000)!; // 10th hit crosses the combo-10 threshold
-    expect(tenthHit.multiplier).toBe(2);
-    expect(tenthHit.pointsAwarded).toBe(100);
+    const tenthHit = engine.onFretDown(0, 10000); // 10th hit crosses the combo-10 threshold
+    expect(tenthHit).toMatchObject({ multiplier: 2, pointsAwarded: 100 });
 
-    const eleventhHit = engine.onFretDown(0, 11000)!;
-    expect(eleventhHit.pointsAwarded).toBe(100); // still 2x
+    const eleventhHit = engine.onFretDown(0, 11000);
+    expect(eleventhHit).toMatchObject({ pointsAwarded: 100 }); // still 2x
   });
 
-  it("reports accuracy as hits over judged notes, and 100% before anything is judged", () => {
+  it("reports accuracy as hits over judged attempts, and 100% before anything is judged", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 }), note({ timeMs: 2000, fret: 1 })]);
     expect(engine.getStats().accuracy).toBe(1);
 
@@ -141,7 +183,7 @@ describe("GameplayEngine.update — timeout misses", () => {
 
   it("is consistent with onFretDown's own window boundary — a press right at the timeout boundary still judges", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
-    expect(engine.onFretDown(0, 1150)?.judgment).toBe(HitJudgment.Ok); // exactly at the 150ms edge
+    expect(engine.onFretDown(0, 1150)).toMatchObject({ kind: "hit", judgment: HitJudgment.Ok }); // exactly at the 150ms edge
   });
 
   it("returns only the notes newly missed by this call — never re-reports one already timed out", () => {

@@ -14,9 +14,11 @@ export {
 export {
   HitJudgment,
   NoteRuntimeState,
+  type FretPressResult,
   type GameplayEngineOptions,
   type GameplayStats,
   type HitResult,
   type HitWindowsMs,
   type JudgedNote,
+  type WrongPressResult,
 } from "./types.ts";

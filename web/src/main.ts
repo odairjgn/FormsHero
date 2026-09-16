@@ -311,9 +311,11 @@ function startGameplay(part: Part, difficult: Difficult): void {
     onFretDown: (fret) => {
       if (!gameplayEngine || !audioEngine) return;
       const result = gameplayEngine.onFretDown(fret, audioEngine.currentTime * 1000);
-      if (result) {
+      if (result?.kind === "hit") {
         hitEffects.push({ fret, spawnedAtMs: performance.now() });
         setInstrumentMuted(false); // playing correctly again brings the track back
+      } else if (result?.kind === "wrongPress") {
+        setInstrumentMuted(true); // no strum bar to buffer it — a stray press is an error, same as missing a note
       }
     },
     onFretUp: (fret) => {
@@ -365,7 +367,8 @@ function renderHud(stats: GameplayStats): void {
   const accuracyPct = (stats.accuracy * 100).toFixed(1);
   hudEl.textContent =
     `Score: ${stats.score} | Combo: ${stats.combo} (recorde ${stats.longestCombo}) | ` +
-    `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal})`;
+    `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal}) | ` +
+    `Erros: ${stats.notesMissed + stats.wrongPresses}`;
 }
 
 function stopGameplay(): void {

@@ -9,9 +9,9 @@ import type { ChartNote } from "../parsing/types.ts";
 
 /** Named timing precision tiers, tightest first — the classic Guitar
  * Hero/Clone Hero "Perfect/Good/Ok" windows the plan calls for. Doesn't
- * include "Miss": a miss is the *absence* of a judgment (either no window
- * matched a keypress, or a note's window fully elapsed unpressed), not a
- * variant of one — see `NoteRuntimeState.Missed` for that case. */
+ * include "Miss": a miss is the *absence* of a judgment, not a variant of
+ * one — see `NoteRuntimeState.Missed` (a note's window elapsed unpressed)
+ * and `WrongPressResult` (a keypress with no note to judge it against). */
 export const HitJudgment = {
   Perfect: "Perfect",
   Good: "Good",
@@ -51,6 +51,7 @@ export interface JudgedNote extends ChartNote {
 /** Returned by `GameplayEngine.onFretDown` for a successful hit, so the UI
  * layer can drive feedback (flash/particle) without re-deriving it. */
 export interface HitResult {
+  readonly kind: "hit";
   readonly noteId: number;
   readonly fret: number;
   readonly judgment: HitJudgment;
@@ -61,6 +62,25 @@ export interface HitResult {
   readonly multiplier: number;
 }
 
+/**
+ * A fret press with nothing to judge it against — no note pending on that
+ * fret at all, or the nearest one's offset falls outside every timing
+ * window. Treated as an outright error (breaks combo, no points): the
+ * keyboard/gamepad input this project targets (the plan's default D/F/J/K/L,
+ * or a PS2-style controller's face buttons) has no strum bar to buffer a
+ * careless press against the way a real guitar peripheral does — so a
+ * fret pressed "at random" has to be a mistake, not a no-op.
+ */
+export interface WrongPressResult {
+  readonly kind: "wrongPress";
+  readonly fret: number;
+}
+
+/** Everything `GameplayEngine.onFretDown` can return for an actual keypress
+ * (as opposed to `null`, reserved for a fret already holding a sustain —
+ * see `onFretDown`'s own doc comment). */
+export type FretPressResult = HitResult | WrongPressResult;
+
 /** Live score/combo/accuracy snapshot for the HUD. */
 export interface GameplayStats {
   readonly score: number;
@@ -68,10 +88,16 @@ export interface GameplayStats {
   readonly longestCombo: number;
   readonly multiplier: number;
   readonly notesHit: number;
+  /** Chart notes whose window elapsed with no keypress at all. */
   readonly notesMissed: number;
+  /** Keypresses judged as a `WrongPressResult` — pressing a fret with
+   * nothing to hit. Kept separate from `notesMissed` since it isn't tied to
+   * any chart note, but folded into `accuracy` alongside it: mashing keys
+   * should cost accuracy just as much as missing real notes does. */
+  readonly wrongPresses: number;
   readonly notesTotal: number;
-  /** `notesHit / (notesHit + notesMissed)`; `1` before anything's judged
-   * yet, so a fresh HUD doesn't show a misleading 0%. */
+  /** `notesHit / (notesHit + notesMissed + wrongPresses)`; `1` before
+   * anything's judged yet, so a fresh HUD doesn't show a misleading 0%. */
   readonly accuracy: number;
 }
 

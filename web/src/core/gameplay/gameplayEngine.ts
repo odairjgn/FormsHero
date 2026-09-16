@@ -21,7 +21,7 @@ import {
   computeSustainPoints,
 } from "./scoring.ts";
 import { NoteRuntimeState } from "./types.ts";
-import type { GameplayEngineOptions, GameplayStats, HitResult, HitWindowsMs, JudgedNote } from "./types.ts";
+import type { FretPressResult, GameplayEngineOptions, GameplayStats, HitWindowsMs, JudgedNote } from "./types.ts";
 
 const FRET_COUNT = 5;
 
@@ -51,6 +51,7 @@ export class GameplayEngine {
   private longestCombo = 0;
   private notesHit = 0;
   private notesMissed = 0;
+  private wrongPresses = 0;
 
   constructor(chartNotes: readonly ChartNote[], options: GameplayEngineOptions = {}) {
     this.hitWindowsMs = options.hitWindowsMs ?? DEFAULT_HIT_WINDOWS_MS;
@@ -72,7 +73,7 @@ export class GameplayEngine {
   }
 
   getStats(): GameplayStats {
-    const notesJudged = this.notesHit + this.notesMissed;
+    const attempts = this.notesHit + this.notesMissed + this.wrongPresses;
     return {
       score: this.score,
       combo: this.combo,
@@ -80,8 +81,9 @@ export class GameplayEngine {
       multiplier: computeMultiplier(this.combo, this.comboMultiplierThresholds),
       notesHit: this.notesHit,
       notesMissed: this.notesMissed,
+      wrongPresses: this.wrongPresses,
       notesTotal: this.notes.length,
-      accuracy: notesJudged === 0 ? 1 : this.notesHit / notesJudged,
+      accuracy: attempts === 0 ? 1 : this.notesHit / attempts,
     };
   }
 
@@ -125,24 +127,28 @@ export class GameplayEngine {
 
   /**
    * The plan's central "julgamento de acerto": judges a fret press against
-   * that fret's earliest not-yet-judged note. A press with no note close
-   * enough to any window (or while already holding a sustain on that fret)
-   * is simply ignored — not penalized — matching how classic Guitar
-   * Hero-style games don't punish an extra press outside a strum window.
+   * that fret's earliest not-yet-judged note. There's no strum bar to
+   * buffer a careless press the way a real guitar controller has — this
+   * project's input is either a keyboard or a gamepad's face buttons (a PS2
+   * controller, say), so a press with nothing to hit is a `WrongPressResult`
+   * (breaks combo, no points), not a no-op.
    *
-   * Returns the judgment for the caller to drive feedback with (flash on
-   * the right lane, particle, etc.), or `null` if nothing was judged.
+   * The one press that *is* silently ignored is a repeat on a fret already
+   * holding a sustain — that's not a player mistake, just this engine's own
+   * bookkeeping (see `holding`), so it returns `null` instead.
    */
-  onFretDown(fret: number, songTimeMs: number): HitResult | null {
+  onFretDown(fret: number, songTimeMs: number): FretPressResult | null {
     if (this.holding[fret]) return null;
 
     const queue = this.notesByFret[fret];
     const note = queue[this.nextPendingIndexByFret[fret]];
-    if (!note) return null;
+    const judgment = note ? classifyTiming(songTimeMs - note.timeMs, this.hitWindowsMs) : null;
 
-    const deltaMs = songTimeMs - note.timeMs;
-    const judgment = classifyTiming(deltaMs, this.hitWindowsMs);
-    if (judgment === null) return null;
+    if (!note || judgment === null) {
+      this.combo = 0;
+      this.wrongPresses++;
+      return { kind: "wrongPress", fret };
+    }
 
     this.nextPendingIndexByFret[fret]++;
     this.notesHit++;
@@ -160,7 +166,8 @@ export class GameplayEngine {
       note.state = NoteRuntimeState.Hit;
     }
 
-    return { noteId: note.id, fret, judgment, deltaMs, pointsAwarded, combo: this.combo, multiplier };
+    const deltaMs = songTimeMs - note.timeMs;
+    return { kind: "hit", noteId: note.id, fret, judgment, deltaMs, pointsAwarded, combo: this.combo, multiplier };
   }
 
   /**
