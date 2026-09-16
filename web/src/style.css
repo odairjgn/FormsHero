@@ -87,3 +87,22 @@ input[type="file"] {
 .results-stats + button {
   margin-right: 0.5rem;
 }
+
+.new-record {
+  color: #f5d033;
+  font-weight: bold;
+}
+
+.settings section {
+  margin-bottom: 1.2rem;
+}
+
+.settings label {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.settings input[type="number"] {
+  width: 5rem;
+  margin-left: 0.4rem;
+}

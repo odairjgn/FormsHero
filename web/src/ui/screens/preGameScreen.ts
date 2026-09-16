@@ -6,11 +6,17 @@
 
 import { Difficult } from "../../core/parsing/index.ts";
 import type { Part, Song } from "../../core/parsing/index.ts";
+import type { HighScoreEntry } from "../../core/settings/index.ts";
 import { escapeHtml, songDisplayTitle } from "./formatting.ts";
 
 export interface PreGameCallbacks {
   onStart(part: Part, difficult: Difficult): void;
   onBack(): void;
+  /** Etapa 5's "recordes por música/dificuldade" — looked up per selection
+   * rather than passed in bulk, since the caller owns `localStorage` access
+   * (see `core/settings/highScores.ts`) and this screen only needs whatever
+   * is currently selected. */
+  getHighScore(part: Part, difficult: Difficult): HighScoreEntry | null;
 }
 
 export function renderPreGameScreen(
@@ -30,6 +36,7 @@ export function renderPreGameScreen(
           ? `
         <label for="part-select">Instrumento/dificuldade:</label>
         <select id="part-select"></select>
+        <p id="high-score" class="status"></p>
         <p>Teclas: D F J K L (verde / vermelho / amarelo / azul / laranja)</p>
         <button id="start-btn" type="button">Iniciar jogo</button>
       `
@@ -42,6 +49,7 @@ export function renderPreGameScreen(
   if (!hasOptions) return;
 
   const partSelect = container.querySelector<HTMLSelectElement>("#part-select")!;
+  const highScoreEl = container.querySelector<HTMLParagraphElement>("#high-score")!;
   for (const part of parts) {
     for (const difficult of part.availableDifficulties) {
       const option = document.createElement("option");
@@ -51,9 +59,25 @@ export function renderPreGameScreen(
     }
   }
 
-  container.querySelector<HTMLButtonElement>("#start-btn")!.addEventListener("click", () => {
+  function selectedPart(): { part: Part; difficult: Difficult } | null {
     const [indexRaw, difficult] = partSelect.value.split(":");
     const part = parts.find((p) => p.index === Number(indexRaw));
-    if (part) callbacks.onStart(part, difficult as Difficult);
+    return part ? { part, difficult: difficult as Difficult } : null;
+  }
+
+  function renderHighScore(): void {
+    const selected = selectedPart();
+    const best = selected ? callbacks.getHighScore(selected.part, selected.difficult) : null;
+    highScoreEl.textContent = best
+      ? `Recorde: ${best.score} pontos (${(best.accuracy * 100).toFixed(1)}% de acerto, combo ${best.longestCombo})`
+      : "Sem recorde ainda.";
+  }
+
+  partSelect.addEventListener("change", renderHighScore);
+  renderHighScore();
+
+  container.querySelector<HTMLButtonElement>("#start-btn")!.addEventListener("click", () => {
+    const selected = selectedPart();
+    if (selected) callbacks.onStart(selected.part, selected.difficult);
   });
 }

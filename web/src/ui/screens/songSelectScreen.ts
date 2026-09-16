@@ -9,12 +9,14 @@ import type { LibrarySongEntry, SongFolderNode, SongLibraryEntry } from "../../c
 
 export interface SongSelectCallbacks {
   onSongChosen(entry: LibrarySongEntry): void;
+  onOpenSettings(): void;
 }
 
 export function renderSongSelectScreen(container: HTMLElement, callbacks: SongSelectCallbacks): void {
   container.innerHTML = `
     <div class="screen">
       <h1>FormsHero</h1>
+      <button id="settings-btn" type="button">Configurações</button>
       <p>Escolha uma pasta de biblioteca de músicas no formato Frets on Fire / Clone Hero
       (ex.: <code>FormsHero/musica</code>) para ver as músicas disponíveis.</p>
       <input id="folder-input" type="file" webkitdirectory multiple />
@@ -22,6 +24,8 @@ export function renderSongSelectScreen(container: HTMLElement, callbacks: SongSe
       <div id="song-list"></div>
     </div>
   `;
+
+  container.querySelector<HTMLButtonElement>("#settings-btn")!.addEventListener("click", callbacks.onOpenSettings);
 
   const folderInput = container.querySelector<HTMLInputElement>("#folder-input")!;
   const statusEl = container.querySelector<HTMLParagraphElement>("#song-select-status")!;

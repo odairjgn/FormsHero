@@ -17,9 +17,12 @@ import {
   readSong,
 } from "./core/parsing/index.ts";
 import type { Difficult, LibrarySongEntry, Part, Song } from "./core/parsing/index.ts";
+import { highScoreKey, loadGameSettings, loadHighScore, recordHighScoreAttempt, saveGameSettings } from "./core/settings/index.ts";
+import type { GameSettings } from "./core/settings/index.ts";
 import {
   renderPreGameScreen,
   renderResultsScreen,
+  renderSettingsScreen,
   renderSongSelectScreen,
   startGameplayScreen,
 } from "./ui/index.ts";
@@ -46,15 +49,39 @@ interface LoadedSong {
 export function startApp(container: HTMLElement): void {
   let audioContext: AudioContext | null = null;
   let stopActiveGameplay: (() => void) | null = null;
+  // Etapa 5 tuning/calibration, loaded once and kept in memory — reloaded
+  // from `localStorage` only at startup, written back on every save from
+  // the settings screen (see `showSettings`).
+  let settings: GameSettings = loadGameSettings(window.localStorage);
 
   function leaveGameplay(): void {
     stopActiveGameplay?.();
     stopActiveGameplay = null;
   }
 
+  function ensureAudioContext(): AudioContext {
+    audioContext ??= new AudioContext();
+    return audioContext;
+  }
+
   function showSongSelect(): void {
     leaveGameplay();
-    renderSongSelectScreen(container, { onSongChosen: (entry) => void loadSong(entry) });
+    renderSongSelectScreen(container, {
+      onSongChosen: (entry) => void loadSong(entry),
+      onOpenSettings: showSettings,
+    });
+  }
+
+  function showSettings(): void {
+    leaveGameplay();
+    renderSettingsScreen(container, ensureAudioContext(), settings, {
+      onBack: showSongSelect,
+      onSave: (updated) => {
+        settings = updated;
+        saveGameSettings(window.localStorage, settings);
+        showSongSelect();
+      },
+    });
   }
 
   async function loadSong(entry: LibrarySongEntry): Promise<void> {
@@ -63,8 +90,7 @@ export function startApp(container: HTMLElement): void {
 
     try {
       const song = await readSong(entry);
-      audioContext ??= new AudioContext();
-      const audioEngine = await loadAudioEngineForSong(audioContext, song);
+      const audioEngine = await loadAudioEngineForSong(ensureAudioContext(), song);
 
       const midi = new Midi(await getPlayableMidiFile(song).arrayBuffer());
       const parts = readChartMetadata(midi).filter(
@@ -87,11 +113,19 @@ export function startApp(container: HTMLElement): void {
     container.querySelector<HTMLButtonElement>("#back-btn")!.addEventListener("click", showSongSelect);
   }
 
+  /** Etapa 5's "recordes por música/dificuldade" key — `directoryPath` is
+   * stable across reloads of the same library folder (see
+   * `core/settings/highScores.ts`'s doc comment on `highScoreKey`). */
+  function songHighScoreKey(loaded: LoadedSong, part: Part, difficult: Difficult): string {
+    return highScoreKey({ songId: loaded.song.directoryPath, instrument: part.instrument, difficult });
+  }
+
   function showPreGame(loaded: LoadedSong): void {
     leaveGameplay();
     renderPreGameScreen(container, loaded.song, loaded.parts, {
       onBack: showSongSelect,
       onStart: (part, difficult) => showGameplay(loaded, part, difficult),
+      getHighScore: (part, difficult) => loadHighScore(window.localStorage, songHighScoreKey(loaded, part, difficult)),
     });
   }
 
@@ -101,6 +135,9 @@ export function startApp(container: HTMLElement): void {
       audioEngine: loaded.audioEngine,
       notes,
       instrumentLayer: AUDIO_LAYER_BY_INSTRUMENT[part.instrument] ?? null,
+      hitWindowsMs: settings.hitWindowsMs,
+      scrollPxPerMs: settings.scrollPxPerMs,
+      inputOffsetMs: settings.calibrationOffsetMs,
       onFinished: (stats) => {
         stopActiveGameplay = null;
         showResults(loaded, part, difficult, stats);
@@ -113,7 +150,14 @@ export function startApp(container: HTMLElement): void {
   }
 
   function showResults(loaded: LoadedSong, part: Part, difficult: Difficult, stats: GameplayStats): void {
-    renderResultsScreen(container, loaded.song, part, difficult, stats, {
+    const record = recordHighScoreAttempt(window.localStorage, songHighScoreKey(loaded, part, difficult), {
+      score: stats.score,
+      accuracy: stats.accuracy,
+      longestCombo: stats.longestCombo,
+      achievedAt: new Date().toISOString(),
+    });
+
+    renderResultsScreen(container, loaded.song, part, difficult, stats, record, {
       onPlayAgain: () => showGameplay(loaded, part, difficult),
       onBackToSongSelect: showSongSelect,
     });

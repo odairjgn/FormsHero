@@ -5,7 +5,7 @@
 // (`onFinished`) rather than running until the player manually hits Stop.
 
 import { GameplayEngine } from "../../core/gameplay/index.ts";
-import type { GameplayStats } from "../../core/gameplay/index.ts";
+import type { GameplayStats, HitWindowsMs } from "../../core/gameplay/index.ts";
 import type { AudioEngine, AudioLayer } from "../../core/audio/index.ts";
 import type { ChartNote } from "../../core/parsing/index.ts";
 import { HIT_EFFECT_DURATION_MS, NoteHighway, attachKeyboardFretInput } from "../index.ts";
@@ -17,6 +17,14 @@ export interface GameplayScreenOptions {
   /** Stem to mute on a miss/wrong press, Guitar Hero-style — `null` for an
    * instrument with no matching layer (out of MVP scope anyway). */
   readonly instrumentLayer: AudioLayer | null;
+  /** Etapa 5 tuning, from `core/settings`: player-adjustable judgment
+   * windows and highway scroll speed, defaulted by the caller if omitted. */
+  readonly hitWindowsMs?: HitWindowsMs;
+  readonly scrollPxPerMs?: number;
+  /** Etapa 5 calibration offset (ms), added to the song clock before it's
+   * used to judge input — see `core/settings/calibration.ts`'s header
+   * comment for why only judging (not rendering) shifts by this. */
+  readonly inputOffsetMs?: number;
   onFinished(stats: GameplayStats): void;
   onQuit(): void;
 }
@@ -28,7 +36,8 @@ export interface GameplayScreenOptions {
  * way (e.g. a hard reset) — calling it twice is safe either way.
  */
 export function startGameplayScreen(container: HTMLElement, options: GameplayScreenOptions): () => void {
-  const { audioEngine, notes, instrumentLayer, onFinished, onQuit } = options;
+  const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, onFinished, onQuit } = options;
+  const inputOffsetMs = options.inputOffsetMs ?? 0;
 
   container.innerHTML = `
     <div class="screen gameplay">
@@ -42,8 +51,8 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
   const canvasEl = container.querySelector<HTMLCanvasElement>("#note-highway")!;
   const quitBtn = container.querySelector<HTMLButtonElement>("#quit-btn")!;
 
-  const gameplayEngine = new GameplayEngine(notes);
-  const noteHighway = new NoteHighway(canvasEl);
+  const gameplayEngine = new GameplayEngine(notes, { hitWindowsMs });
+  const noteHighway = new NoteHighway(canvasEl, { scrollPxPerMs });
   let hitEffects: HitEffect[] = [];
   let rafHandle = 0;
   let done = false;
@@ -60,9 +69,15 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     if (instrumentLayer) audioEngine.setMuteState(instrumentLayer, muted);
   }
 
+  // Calibration offset applies only to the time judging sees, never to what
+  // the highway renders (see `GameplayScreenOptions.inputOffsetMs`'s doc).
+  function judgeTimeMs(): number {
+    return audioEngine.currentTime * 1000 + inputOffsetMs;
+  }
+
   const detachKeyboard = attachKeyboardFretInput(window, {
     onFretDown: (fret) => {
-      const result = gameplayEngine.onFretDown(fret, audioEngine.currentTime * 1000);
+      const result = gameplayEngine.onFretDown(fret, judgeTimeMs());
       if (result?.kind === "hit") {
         hitEffects.push({ fret, spawnedAtMs: performance.now() });
         setInstrumentMuted(false); // playing correctly again brings the track back
@@ -71,7 +86,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
       }
     },
     onFretUp: (fret) => {
-      gameplayEngine.onFretUp(fret, audioEngine.currentTime * 1000);
+      gameplayEngine.onFretUp(fret, judgeTimeMs());
     },
   });
 
@@ -91,7 +106,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
 
   function tick(): void {
     const songTimeMs = audioEngine.currentTime * 1000;
-    const newlyMissed = gameplayEngine.update(songTimeMs);
+    const newlyMissed = gameplayEngine.update(judgeTimeMs());
     if (newlyMissed.length > 0) setInstrumentMuted(true);
 
     const now = performance.now();

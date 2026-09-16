@@ -10,3 +10,6 @@ export { renderSongSelectScreen, type SongSelectCallbacks } from "./screens/song
 export { renderPreGameScreen, type PreGameCallbacks } from "./screens/preGameScreen.ts";
 export { startGameplayScreen, type GameplayScreenOptions } from "./screens/gameplayScreen.ts";
 export { renderResultsScreen, type ResultsCallbacks } from "./screens/resultsScreen.ts";
+
+// Etapa 5's settings/calibration screen — see docs/web-port-plan.md.
+export { renderSettingsScreen, type SettingsCallbacks } from "./screens/settingsScreen.ts";
