@@ -10,8 +10,12 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^22.20.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28"
   }
 }
