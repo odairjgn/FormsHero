@@ -72,7 +72,128 @@ Estes pontos justificam decisões de arquitetura nas etapas abaixo:
 - Ajustes finos de janelas de julgamento e de velocidade de scroll com base em playtesting.
 
 ### Etapa 6 — Backlog pós-MVP (fora do escopo inicial)
-- Bateria (pads sem sustain), Vocal (pitch via microfone, `AnalyserNode`), HOPO/tap notes, star power/overdrive, "rock meter" com falha de música, multiplayer local (2 instrumentos), leaderboard online (exigiria backend, fora da decisão atual de site estático).
+
+Sete itens independentes entre si — nenhuma ordem obrigatória além das dependências
+citadas em cada um. Cada subseção é um ponto de partida para quando for a vez de
+implementar aquele item, não uma tarefa em andamento. Estado atual do código (para
+referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/audio`
+(Etapa 2), `core/gameplay` (Etapa 3 — `gameplayEngine.ts`/`judgment.ts`/`scoring.ts`/`types.ts`),
+`ui/screens` (Etapa 4 — `songSelectScreen`, `preGameScreen`, `gameplayScreen`, `resultsScreen`,
+`settingsScreen`), `core/settings` (Etapa 5 — `calibration.ts`, `highScores.ts`, `gameSettings.ts`).
+
+#### 6.1 — HOPO / tap notes
+- **O que é**: notas hammer-on/pull-off (e tap notes) podem ser acertadas sem repicar
+  (sem nova pressão de tecla), desde que a nota anterior tenha sido acertada e a
+  próxima esteja dentro de uma janela curta — regra clássica de Guitar Hero/Clone Hero.
+- **Onde mexe**: `core/parsing/chartNotes.ts` (o formato FoF/Clone Hero marca HOPO via
+  nota MIDI 1 de "sustenido" um semitom acima da gema, ou flag de tap via texto/sysex —
+  checar como o `notes.mid` das 8 músicas de `musica/` marca isso antes de decidir o
+  parsing; **não pode virar campo inventado que não reflita o chart real**, é o mesmo
+  dado que Clone Hero lê). Adicionar `isHopo`/`isTap` em `ChartNote` (`core/parsing/types.ts`)
+  e `core/gameplay/types.ts` (`JudgedNote` herda). Nova regra em `judgment.ts`: permitir
+  hit sem keypress novo se a nota anterior foi `Hit`/`SustainCompleted` e o fret muda.
+- **Depende de**: nada além do motor atual — é uma extensão de `judgment.ts`.
+- **Teste**: casos determinísticos em `judgment.test.ts` com sequência hit→HOPO→miss.
+
+#### 6.2 — Star power / overdrive
+- **O que é**: trechos do chart marcados como "fase de star power" (no MIDI, nota 116
+  no FoF/Clone Hero); ao acertar 100% das notas de uma fase, o jogador acumula uma
+  barra; ativá-la (tecla dedicada, ex. barra de espaço) dobra o multiplicador de
+  pontos por um tempo.
+- **Onde mexe**: `core/parsing/chartNotes.ts` para extrair as fases de SP (nota 116)
+  como `{ startMs, endMs }[]`; `core/gameplay/scoring.ts` para o multiplicador dobrado
+  enquanto ativo; `core/gameplay/gameplayEngine.ts` expõe `activateStarPower()` e o
+  estado da barra em `GameplayStats` (novo campo `starPower: { available: number; active: boolean }`);
+  `ui/screens/gameplayScreen.ts` + `ui/keyboardInput.ts` para a tecla de ativação e o
+  HUD da barra; `ui/noteHighway.ts` para o feedback visual (highway "brilhando").
+- **Depende de**: nada além do motor atual.
+- **Teste**: `scoring.test.ts` cobrindo acúmulo de barra e multiplicador dobrado.
+
+#### 6.3 — Rock meter (falha de música)
+- **O que é**: barra de energia que sobe em acerto e desce em miss/wrong-press; some
+  a barra e a música para/falha, como o Guitar Hero clássico.
+- **Onde mexe**: menor escopo do backlog — reaproveita `GameplayStats` existente.
+  Novo campo `rockMeter: number` (0–100) em `core/gameplay/types.ts`, atualizado em
+  `gameplayEngine.ts` a cada `onFretDown`/timeout de miss (ex.: +2 por hit, -6 por
+  miss/wrong-press, clamp 0–100). Ao chegar a 0, o engine expõe um estado `failed`
+  que `gameplayScreen.ts` observa para parar o `AudioEngine` (Etapa 2) e navegar para
+  `resultsScreen.ts` com um motivo de encerramento ("Você falhou a música").
+- **Depende de**: nada além do motor atual. Bom candidato para ser o primeiro item do
+  backlog a sair, por ser isolado e pequeno.
+- **Teste**: `gameplayEngine.test.ts` com sequência de misses levando a `failed`.
+
+#### 6.4 — Bateria (pads sem sustain)
+- **O que é**: instrumento jogável novo, `GameInstrument.Drums` (já existe no enum
+  em `core/parsing/types.ts`, só não é tratado como jogável ainda). Pads sem sustain
+  (toque instantâneo), tipicamente 4-5 pads (kick + 4 tambores/pratos no mapeamento
+  Clone Hero).
+- **Onde mexe**: `core/parsing/parser.ts` — a extração de notas por dificuldade já
+  cobre `Drums` (mesma lógica de `GetGemIndex`/gemas por faixa MIDI), então
+  `chartNotes.ts` deve funcionar sem mudança estrutural grande, mas sustains sempre
+  0 para bateria (o parsing pode simplesmente ignorar `sustainMs` na extração para
+  esse instrumento, ou o gameplay engine tratar bateria como "sempre sustainMs=0").
+  `core/gameplay/gameplayEngine.ts`/`judgment.ts` precisam de um modo "sem sustain"
+  (pular os estados `Holding`/`SustainCompleted`/`SustainBroken` do `NoteRuntimeState`
+  para esse instrumento). `ui/noteHighway.ts` precisa de um layout alternativo (pads
+  em vez de barras longas — mesma ideia de trilha, sem desenhar corpo de sustain).
+  `ui/keyboardInput.ts`/`preGameScreen.ts` precisam listar `Drums` como opção
+  selecionável (hoje o `preGameScreen` já itera `parts` genericamente, então deve
+  bastar `songSelectScreen`/filtragem de `parts` não excluir mais `Drums` — checar
+  onde isso é filtrado hoje, se for).
+- **Depende de**: nada além do motor atual.
+- **Teste**: `chartNotes.test.ts` com uma música real de `musica/` que tenha `PART DRUMS`;
+  `judgment.test.ts` cobrindo o modo sem sustain.
+
+#### 6.5 — Vocal (pitch via microfone)
+- **O que é**: captura de áudio do microfone (`getUserMedia` + `AnalyserNode`/`AudioWorklet`
+  para detecção de pitch), comparado contra as notas de `PART VOCALS` do chart
+  (`LyricEvent` para letra na tela, `NoteOnEvent`/`NoteOffEvent` com nota < 100 para
+  afinação — mesma leitura que `Form1._midiPlayer_MessageDispached` faz no C#, ver
+  CLAUDE.md).
+- **Onde mexe**: novo módulo `core/audio/pitchDetection.ts` (ex.: autocorrelação ou
+  YIN sobre o buffer do `AnalyserNode`) — **não existe equivalente no C#** (lá,
+  vocal só toca no MIDI-out, não julga pitch do jogador; é gameplay novo, como o
+  motor da Etapa 3 foi). Novo `core/parsing` para extrair `{ timeMs, durationMs, pitch, lyric }[]`
+  de `PART VOCALS` (hoje `chartNotes.ts` só extrai gemas de guitarra/baixo por
+  faixa MIDI fixa — vocal não usa o mesmo range de nota). Novo módulo de julgamento
+  de afinação em `core/gameplay` (janela de tolerância em semitons, não em ms como
+  as gemas). UI nova: barra de pitch + letra rolando (equivalente web do `VocalView`
+  do C#).
+- **Depende de**: permissão de microfone do navegador (tratar negação/indisponibilidade
+  com fallback gracioso — sem gameplay de vocal, não travar a tela). Maior item do
+  backlog em escopo; vale quebrar em sub-tarefas próprias quando for a vez.
+- **Teste**: detecção de pitch é difícil de testar deterministicamente com Vitest puro;
+  considerar fixtures de áudio gravado com pitch conhecido, ou isolar a lógica de
+  comparação nota-esperada-vs-pitch-detectado (essa parte é pura e testável) do
+  código de captura de microfone (esse não é).
+
+#### 6.6 — Multiplayer local (2 instrumentos)
+- **O que é**: dois jogadores simultâneos (ex. guitarra + baixo) na mesma tela,
+  cada um com seu próprio highway, mapeamento de teclado e score/combo.
+- **Onde mexe**: `core/gameplay/gameplayEngine.ts` já é uma classe/factory por
+  instância — instanciar duas (uma por jogador) contra o mesmo `songTime` do
+  `AudioEngine` (Etapa 2, já é um clock único compartilhável) deve funcionar sem
+  mudar o engine em si. `ui/keyboardInput.ts` precisa de dois mapeamentos de tecla
+  simultâneos sem conflito (o default D/F/J/K/L de um jogador precisa de um segundo
+  set, ex. teclado numérico ou uma segunda metade do teclado — ver `core/settings/gameSettings.ts`
+  para onde já existe configuração de teclas, estender para "por jogador").
+  `ui/noteHighway.ts` e `ui/screens/gameplayScreen.ts` precisam renderizar duas
+  highways lado a lado no mesmo `<canvas>` (ou dois `<canvas>`); `preGameScreen.ts`
+  precisa de um segundo seletor de instrumento/dificuldade para o jogador 2;
+  `resultsScreen.ts` precisa mostrar os dois resultados.
+- **Depende de**: nada além do motor atual, mas é o item de maior mudança em UI/telas
+  (toca em quase todo `ui/screens`).
+- **Teste**: `gameplayEngine.test.ts` já cobre uma instância; útil um teste de duas
+  instâncias rodando contra o mesmo clock sem interferência de estado (garantir que
+  não há estado global compartilhado indevido entre elas).
+
+#### 6.7 — Leaderboard online
+- **Fora de cogitação enquanto a decisão "sem backend, site 100% estático" (ver topo
+  deste documento) estiver de pé** — um leaderboard online exige um servidor (ou
+  serviço de terceiros) para persistir e servir scores entre jogadores, o que
+  contradiz diretamente essa decisão travada. Só faz sentido revisitar este item se
+  essa decisão for revista explicitamente; até lá, `core/settings/highScores.ts`
+  (Etapa 5, local via `localStorage`) é o único mecanismo de recorde.
 
 ## Observação sobre testes
 
