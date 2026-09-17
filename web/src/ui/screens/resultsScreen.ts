@@ -19,17 +19,22 @@ export function renderResultsScreen(
   difficult: Difficult,
   stats: GameplayStats,
   record: RecordAttemptResult,
+  /** Etapa 6.3: true when this playthrough ended via `onFailed` (the rock
+   * meter bottomed out) rather than reaching the end of the song. */
+  failed: boolean,
   callbacks: ResultsCallbacks,
 ): void {
   const accuracyPct = (stats.accuracy * 100).toFixed(1);
   const recordLine = record.isNewRecord
     ? `<p class="new-record">Novo recorde!</p>`
     : `<p>Recorde da música: ${record.best.score} pontos (${(record.best.accuracy * 100).toFixed(1)}%, combo ${record.best.longestCombo})</p>`;
+  const failureLine = failed ? `<p class="failure">Você falhou a música.</p>` : "";
 
   container.innerHTML = `
     <div class="screen results">
       <h1>${escapeHtml(songDisplayTitle(song))}</h1>
       <p>${escapeHtml(part.instrument)} — ${escapeHtml(difficult)}</p>
+      ${failureLine}
       <ul class="results-stats">
         <li>Pontuação final: <strong>${stats.score}</strong></li>
         <li>Maior combo: <strong>${stats.longestCombo}</strong></li>

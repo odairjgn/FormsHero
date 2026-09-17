@@ -22,6 +22,8 @@ describe("GameplayEngine construction", () => {
       wrongPresses: 0,
       notesTotal: 2,
       accuracy: 1,
+      rockMeter: 50,
+      failed: false,
     });
   });
 
@@ -256,5 +258,50 @@ describe("GameplayEngine — sustains", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
     expect(() => engine.onFretUp(0, 1000)).not.toThrow();
     expect(engine.getStats().score).toBe(0);
+  });
+});
+
+describe("GameplayEngine — rock meter (Etapa 6.3)", () => {
+  it("starts at 50 and rises on a hit, clamped at 100", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
+    expect(engine.getStats().rockMeter).toBe(50);
+
+    engine.onFretDown(0, 1000);
+    expect(engine.getStats().rockMeter).toBe(52);
+  });
+
+  it("falls on a timed-out miss and on a wrong press, clamped at 0", () => {
+    const notes = Array.from({ length: 20 }, (_, i) => note({ timeMs: (i + 1) * 1000, fret: 0 }));
+    const engine = new GameplayEngine(notes);
+
+    engine.onFretDown(1, 1000); // wrong press (fret 1 has no notes) -> -6
+    expect(engine.getStats().rockMeter).toBe(44);
+
+    engine.update(1200); // note at 1000's OK window (1150) elapsed -> miss -> -6
+    expect(engine.getStats().rockMeter).toBe(38);
+  });
+
+  it("exposes failed once the meter bottoms out, from a sequence of misses", () => {
+    const notes = Array.from({ length: 10 }, (_, i) => note({ timeMs: (i + 1) * 1000, fret: 0 }));
+    const engine = new GameplayEngine(notes);
+    expect(engine.getStats().failed).toBe(false);
+
+    for (let i = 0; i < 9; i++) {
+      engine.update((i + 1) * 1000 + 200); // each note's OK window elapses unpressed
+    }
+    expect(engine.getStats().rockMeter).toBe(0); // 50 - 9*6, clamped at 0
+    expect(engine.getStats().failed).toBe(true);
+  });
+
+  it("honors custom start value and rates", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })], {
+      rockMeterStartValue: 10,
+      rockMeterGainPerHit: 1,
+      rockMeterLossPerMiss: 20,
+    });
+
+    engine.onFretDown(1, 1000); // wrong press -> -20, clamped at 0
+    expect(engine.getStats().rockMeter).toBe(0);
+    expect(engine.getStats().failed).toBe(true);
   });
 });

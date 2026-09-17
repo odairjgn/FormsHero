@@ -140,7 +140,11 @@ export function startApp(container: HTMLElement): void {
       inputOffsetMs: settings.calibrationOffsetMs,
       onFinished: (stats) => {
         stopActiveGameplay = null;
-        showResults(loaded, part, difficult, stats);
+        showResults(loaded, part, difficult, stats, false);
+      },
+      onFailed: (stats) => {
+        stopActiveGameplay = null;
+        showResults(loaded, part, difficult, stats, true);
       },
       onQuit: () => {
         stopActiveGameplay = null;
@@ -149,7 +153,13 @@ export function startApp(container: HTMLElement): void {
     });
   }
 
-  function showResults(loaded: LoadedSong, part: Part, difficult: Difficult, stats: GameplayStats): void {
+  function showResults(
+    loaded: LoadedSong,
+    part: Part,
+    difficult: Difficult,
+    stats: GameplayStats,
+    failed: boolean,
+  ): void {
     const record = recordHighScoreAttempt(window.localStorage, songHighScoreKey(loaded, part, difficult), {
       score: stats.score,
       accuracy: stats.accuracy,
@@ -157,7 +167,7 @@ export function startApp(container: HTMLElement): void {
       achievedAt: new Date().toISOString(),
     });
 
-    renderResultsScreen(container, loaded.song, part, difficult, stats, record, {
+    renderResultsScreen(container, loaded.song, part, difficult, stats, record, failed, {
       onPlayAgain: () => showGameplay(loaded, part, difficult),
       onBackToSongSelect: showSongSelect,
     });

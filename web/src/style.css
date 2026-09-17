@@ -93,6 +93,11 @@ input[type="file"] {
   font-weight: bold;
 }
 
+.failure {
+  color: #e2483d;
+  font-weight: bold;
+}
+
 .settings section {
   margin-bottom: 1.2rem;
 }

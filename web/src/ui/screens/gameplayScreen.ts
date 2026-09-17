@@ -26,6 +26,10 @@ export interface GameplayScreenOptions {
    * comment for why only judging (not rendering) shifts by this. */
   readonly inputOffsetMs?: number;
   onFinished(stats: GameplayStats): void;
+  /** Etapa 6.3: called instead of `onFinished` once the rock meter bottoms
+   * out (`stats.failed`) — the song stops early rather than playing to the
+   * end. `stats` still carries whatever score/combo was reached. */
+  onFailed(stats: GameplayStats): void;
   onQuit(): void;
 }
 
@@ -36,7 +40,7 @@ export interface GameplayScreenOptions {
  * way (e.g. a hard reset) — calling it twice is safe either way.
  */
 export function startGameplayScreen(container: HTMLElement, options: GameplayScreenOptions): () => void {
-  const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, onFinished, onQuit } = options;
+  const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, onFinished, onFailed, onQuit } = options;
   const inputOffsetMs = options.inputOffsetMs ?? 0;
 
   container.innerHTML = `
@@ -95,7 +99,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     hudEl.textContent =
       `Score: ${stats.score} | Combo: ${stats.combo} (recorde ${stats.longestCombo}) | ` +
       `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal}) | ` +
-      `Erros: ${stats.notesMissed + stats.wrongPresses}`;
+      `Erros: ${stats.notesMissed + stats.wrongPresses} | Energia: ${stats.rockMeter}%`;
   }
 
   function teardown(): void {
@@ -112,13 +116,24 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     const now = performance.now();
     hitEffects = hitEffects.filter((effect) => now - effect.spawnedAtMs <= HIT_EFFECT_DURATION_MS);
 
+    const stats = gameplayEngine.getStats();
     noteHighway.render(gameplayEngine.getNotes(), songTimeMs, hitEffects);
-    renderHud(gameplayEngine.getStats());
+    renderHud(stats);
+
+    // Rock meter failure (Etapa 6.3) ends the song early, same as reaching
+    // the last note does — checked ahead of the normal end-of-song branch
+    // since a failure can happen at any point, not just at the end.
+    if (stats.failed) {
+      done = true;
+      teardown();
+      onFailed(stats);
+      return;
+    }
 
     if (songTimeMs >= endTimeMs) {
       done = true;
       teardown();
-      onFinished(gameplayEngine.getStats());
+      onFinished(stats);
       return;
     }
     rafHandle = requestAnimationFrame(tick);

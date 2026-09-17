@@ -16,7 +16,11 @@ import { DEFAULT_HIT_WINDOWS_MS, classifyTiming } from "./judgment.ts";
 import {
   DEFAULT_BASE_POINTS_PER_NOTE,
   DEFAULT_COMBO_MULTIPLIER_THRESHOLDS,
+  DEFAULT_ROCK_METER_GAIN_PER_HIT,
+  DEFAULT_ROCK_METER_LOSS_PER_MISS,
+  DEFAULT_ROCK_METER_START,
   DEFAULT_SUSTAIN_POINTS_PER_SECOND,
+  clampRockMeter,
   computeMultiplier,
   computeSustainPoints,
 } from "./scoring.ts";
@@ -45,6 +49,8 @@ export class GameplayEngine {
   private readonly basePointsPerNote: number;
   private readonly sustainPointsPerSecond: number;
   private readonly comboMultiplierThresholds: readonly number[];
+  private readonly rockMeterGainPerHit: number;
+  private readonly rockMeterLossPerMiss: number;
 
   private score = 0;
   private combo = 0;
@@ -52,12 +58,16 @@ export class GameplayEngine {
   private notesHit = 0;
   private notesMissed = 0;
   private wrongPresses = 0;
+  private rockMeter: number;
 
   constructor(chartNotes: readonly ChartNote[], options: GameplayEngineOptions = {}) {
     this.hitWindowsMs = options.hitWindowsMs ?? DEFAULT_HIT_WINDOWS_MS;
     this.basePointsPerNote = options.basePointsPerNote ?? DEFAULT_BASE_POINTS_PER_NOTE;
     this.sustainPointsPerSecond = options.sustainPointsPerSecond ?? DEFAULT_SUSTAIN_POINTS_PER_SECOND;
     this.comboMultiplierThresholds = options.comboMultiplierThresholds ?? DEFAULT_COMBO_MULTIPLIER_THRESHOLDS;
+    this.rockMeterGainPerHit = options.rockMeterGainPerHit ?? DEFAULT_ROCK_METER_GAIN_PER_HIT;
+    this.rockMeterLossPerMiss = options.rockMeterLossPerMiss ?? DEFAULT_ROCK_METER_LOSS_PER_MISS;
+    this.rockMeter = clampRockMeter(options.rockMeterStartValue ?? DEFAULT_ROCK_METER_START);
 
     this.notes = chartNotes.map((note, id) => ({ ...note, id, state: NoteRuntimeState.Pending, judgment: null }));
     this.notesByFret = Array.from({ length: FRET_COUNT }, () => []);
@@ -84,6 +94,8 @@ export class GameplayEngine {
       wrongPresses: this.wrongPresses,
       notesTotal: this.notes.length,
       accuracy: attempts === 0 ? 1 : this.notesHit / attempts,
+      rockMeter: this.rockMeter,
+      failed: this.rockMeter <= 0,
     };
   }
 
@@ -147,6 +159,7 @@ export class GameplayEngine {
     if (!note || judgment === null) {
       this.combo = 0;
       this.wrongPresses++;
+      this.rockMeter = clampRockMeter(this.rockMeter - this.rockMeterLossPerMiss);
       return { kind: "wrongPress", fret };
     }
 
@@ -154,6 +167,7 @@ export class GameplayEngine {
     this.notesHit++;
     this.combo++;
     this.longestCombo = Math.max(this.longestCombo, this.combo);
+    this.rockMeter = clampRockMeter(this.rockMeter + this.rockMeterGainPerHit);
     const multiplier = computeMultiplier(this.combo, this.comboMultiplierThresholds);
     const pointsAwarded = this.basePointsPerNote * multiplier;
     this.score += pointsAwarded;
@@ -203,5 +217,6 @@ export class GameplayEngine {
     note.judgment = null;
     this.notesMissed++;
     this.combo = 0;
+    this.rockMeter = clampRockMeter(this.rockMeter - this.rockMeterLossPerMiss);
   }
 }

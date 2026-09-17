@@ -109,18 +109,26 @@ referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/
 - **Depende de**: nada além do motor atual.
 - **Teste**: `scoring.test.ts` cobrindo acúmulo de barra e multiplicador dobrado.
 
-#### 6.3 — Rock meter (falha de música)
+#### 6.3 — Rock meter (falha de música) — ✅ feito
 - **O que é**: barra de energia que sobe em acerto e desce em miss/wrong-press; some
   a barra e a música para/falha, como o Guitar Hero clássico.
-- **Onde mexe**: menor escopo do backlog — reaproveita `GameplayStats` existente.
-  Novo campo `rockMeter: number` (0–100) em `core/gameplay/types.ts`, atualizado em
-  `gameplayEngine.ts` a cada `onFretDown`/timeout de miss (ex.: +2 por hit, -6 por
-  miss/wrong-press, clamp 0–100). Ao chegar a 0, o engine expõe um estado `failed`
-  que `gameplayScreen.ts` observa para parar o `AudioEngine` (Etapa 2) e navegar para
-  `resultsScreen.ts` com um motivo de encerramento ("Você falhou a música").
-- **Depende de**: nada além do motor atual. Bom candidato para ser o primeiro item do
-  backlog a sair, por ser isolado e pequeno.
-- **Teste**: `gameplayEngine.test.ts` com sequência de misses levando a `failed`.
+- **Como foi implementado**: `core/gameplay/scoring.ts` ganhou as constantes
+  `DEFAULT_ROCK_METER_START` (50), `DEFAULT_ROCK_METER_GAIN_PER_HIT` (+2),
+  `DEFAULT_ROCK_METER_LOSS_PER_MISS` (-6) e `clampRockMeter` (clamp 0–100).
+  `GameplayStats` (`core/gameplay/types.ts`) ganhou `rockMeter: number` e
+  `failed: boolean` (`rockMeter <= 0`); `GameplayEngineOptions` ganhou
+  `rockMeterStartValue`/`rockMeterGainPerHit`/`rockMeterLossPerMiss` para
+  configuração opcional. `gameplayEngine.ts` atualiza `rockMeter` em todo hit
+  (`onFretDown`), miss por timeout (`missNote`, chamado por `update()`) e wrong
+  press. `ui/screens/gameplayScreen.ts` ganhou o callback `onFailed(stats)`
+  (irmão de `onFinished`) — `tick()` checa `stats.failed` a cada frame, antes do
+  fim normal de música, e se verdadeiro faz `teardown()` e chama `onFailed` em vez
+  de `onFinished`. `app.ts` passa `onFailed` e propaga um novo parâmetro `failed`
+  até `resultsScreen.ts`, que mostra "Você falhou a música." quando true. HUD do
+  gameplay mostra "Energia: N%".
+- **Teste**: `scoring.test.ts` (`clampRockMeter`) e `gameplayEngine.test.ts`
+  (bloco "GameplayEngine — rock meter (Etapa 6.3)": sobe em hit, desce em miss e
+  wrong press, `failed` após sequência de misses, valores customizados).
 
 #### 6.4 — Bateria (pads sem sustain)
 - **O que é**: instrumento jogável novo, `GameInstrument.Drums` (já existe no enum

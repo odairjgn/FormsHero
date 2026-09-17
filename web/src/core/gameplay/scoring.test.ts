@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMultiplier, computeSustainPoints } from "./scoring.ts";
+import { clampRockMeter, computeMultiplier, computeSustainPoints } from "./scoring.ts";
 
 describe("computeMultiplier — default thresholds [10, 20, 30]", () => {
   it.each([
@@ -34,5 +34,18 @@ describe("computeSustainPoints", () => {
 
   it("honors a custom rate", () => {
     expect(computeSustainPoints(1000, 100)).toBe(100);
+  });
+});
+
+describe("clampRockMeter", () => {
+  it("passes values already inside [0, 100] through unchanged", () => {
+    expect(clampRockMeter(0)).toBe(0);
+    expect(clampRockMeter(50)).toBe(50);
+    expect(clampRockMeter(100)).toBe(100);
+  });
+
+  it("clamps below 0 and above 100", () => {
+    expect(clampRockMeter(-6)).toBe(0);
+    expect(clampRockMeter(106)).toBe(100);
   });
 });

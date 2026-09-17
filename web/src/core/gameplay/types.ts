@@ -99,6 +99,15 @@ export interface GameplayStats {
   /** `notesHit / (notesHit + notesMissed + wrongPresses)`; `1` before
    * anything's judged yet, so a fresh HUD doesn't show a misleading 0%. */
   readonly accuracy: number;
+  /** Etapa 6.3's "barra de energia" (0-100): rises on a hit, falls on a
+   * missed/wrong-press note, clamped at both ends — see
+   * `GameplayEngineOptions.rockMeter*` for the rates and starting value. */
+  readonly rockMeter: number;
+  /** True once `rockMeter` has bottomed out at 0 — the plan's "falha de
+   * música". The engine itself doesn't stop anything on this; it's up to
+   * the caller (`ui/screens/gameplayScreen.ts`) to notice this flag and end
+   * the playthrough, same as it already ends one that reaches its last note. */
+  readonly failed: boolean;
 }
 
 /** Port of the plan's "janelas de tempo (ex.: Perfeito ±35ms, Bom ±90ms,
@@ -118,4 +127,9 @@ export interface GameplayEngineOptions {
    * default `[10, 20, 30]` for 1x -> 2x -> 3x -> 4x (capped at 4x by only
    * having 3 thresholds). */
   readonly comboMultiplierThresholds?: readonly number[];
+  readonly rockMeterStartValue?: number;
+  readonly rockMeterGainPerHit?: number;
+  /** Applied on both a timed-out miss and a wrong press — the plan's
+   * "-6 por miss/wrong-press" treats them the same. */
+  readonly rockMeterLossPerMiss?: number;
 }

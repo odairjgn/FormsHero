@@ -6,6 +6,15 @@ export const DEFAULT_COMBO_MULTIPLIER_THRESHOLDS: readonly number[] = [10, 20, 3
 export const DEFAULT_BASE_POINTS_PER_NOTE = 50;
 export const DEFAULT_SUSTAIN_POINTS_PER_SECOND = 25;
 
+// Etapa 6.3's rock meter — "+2 por hit, -6 por miss/wrong-press, clamp
+// 0-100". Starts at the halfway point, same as classic Guitar Hero: neither
+// an instant fail from an early flub nor an unlosable head start.
+export const ROCK_METER_MIN = 0;
+export const ROCK_METER_MAX = 100;
+export const DEFAULT_ROCK_METER_START = 50;
+export const DEFAULT_ROCK_METER_GAIN_PER_HIT = 2;
+export const DEFAULT_ROCK_METER_LOSS_PER_MISS = 6;
+
 /**
  * Combo multiplier for a given combo count: starts at 1x and steps up by
  * one for every threshold reached. With the default 3 thresholds this caps
@@ -34,4 +43,10 @@ export function computeSustainPoints(
   sustainPointsPerSecond: number = DEFAULT_SUSTAIN_POINTS_PER_SECOND,
 ): number {
   return Math.round((Math.max(0, heldMs) / 1000) * sustainPointsPerSecond);
+}
+
+/** Clamps a rock meter value to its `[0, 100]` range — the same clamp
+ * applies whether it just gained from a hit or lost from a miss. */
+export function clampRockMeter(value: number): number {
+  return Math.min(ROCK_METER_MAX, Math.max(ROCK_METER_MIN, value));
 }
