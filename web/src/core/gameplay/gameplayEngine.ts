@@ -12,7 +12,7 @@
 // off `getNotes()`/`getStats()`.
 
 import type { ChartNote } from "../parsing/types.ts";
-import { DEFAULT_HIT_WINDOWS_MS, classifyTiming } from "./judgment.ts";
+import { DEFAULT_HIT_WINDOWS_MS, classifyTiming, isAutoHitEligible } from "./judgment.ts";
 import {
   DEFAULT_BASE_POINTS_PER_NOTE,
   DEFAULT_COMBO_MULTIPLIER_THRESHOLDS,
@@ -24,8 +24,8 @@ import {
   computeMultiplier,
   computeSustainPoints,
 } from "./scoring.ts";
-import { NoteRuntimeState } from "./types.ts";
-import type { FretPressResult, GameplayEngineOptions, GameplayStats, HitWindowsMs, JudgedNote } from "./types.ts";
+import { HitJudgment, NoteRuntimeState } from "./types.ts";
+import type { FretPressResult, GameplayEngineOptions, GameplayStats, HitResult, HitWindowsMs, JudgedNote } from "./types.ts";
 
 const FRET_COUNT = 5;
 
@@ -105,10 +105,12 @@ export class GameplayEngine {
    * clock `AudioEngine.currentTime` exposes, so judging never drifts from
    * what's audibly playing.
    *
-   * Two things can happen purely from time passing: a pending note's OK
-   * window fully elapses without a keypress (-> `Missed`, combo broken), or
-   * a held sustain plays through to its natural end (-> `SustainCompleted`,
-   * same as releasing exactly on time via `onFretUp`).
+   * Three things can happen purely from time passing: a HOPO/tap note whose
+   * time has come resolves as an on-time hit with no keypress needed (Etapa
+   * 6.1 — see `isAutoHitEligible`), a pending note's OK window fully
+   * elapses without a keypress (-> `Missed`, combo broken), or a held
+   * sustain plays through to its natural end (-> `SustainCompleted`, same
+   * as releasing exactly on time via `onFretUp`).
    *
    * Returns whichever notes were newly marked `Missed` by *this* call (empty
    * if none) — e.g. `src/main.ts` uses this to mute the instrument's audio
@@ -121,11 +123,26 @@ export class GameplayEngine {
     for (let fret = 0; fret < FRET_COUNT; fret++) {
       const queue = this.notesByFret[fret];
       let index = this.nextPendingIndexByFret[fret];
-      while (index < queue.length && queue[index].timeMs + this.hitWindowsMs.ok < songTimeMs) {
-        this.missNote(queue[index]);
-        newlyMissed.push(queue[index]);
-        index++;
+
+      while (index < queue.length) {
+        const candidate = queue[index];
+
+        if (songTimeMs >= candidate.timeMs && isAutoHitEligible(candidate, this.previousNote(candidate))) {
+          this.applyHit(candidate, fret, candidate.timeMs, HitJudgment.Perfect, 0);
+          index++;
+          continue;
+        }
+
+        if (candidate.timeMs + this.hitWindowsMs.ok < songTimeMs) {
+          this.missNote(candidate);
+          newlyMissed.push(candidate);
+          index++;
+          continue;
+        }
+
+        break;
       }
+
       this.nextPendingIndexByFret[fret] = index;
 
       const holding = this.holding[fret];
@@ -164,6 +181,20 @@ export class GameplayEngine {
     }
 
     this.nextPendingIndexByFret[fret]++;
+    return this.applyHit(note, fret, songTimeMs, judgment, songTimeMs - note.timeMs);
+  }
+
+  /**
+   * The scoring/state-transition half of judging a hit, shared between a
+   * real `onFretDown` keypress and `update()`'s HOPO/tap auto-hit (Etapa
+   * 6.1) — the two differ only in *how* the note got judged (a keypress's
+   * timing offset vs. an automatic on-time `Perfect`), not in what happens
+   * once it has been. Callers are responsible for advancing
+   * `nextPendingIndexByFret` themselves first, since `onFretDown` and
+   * `update()` each track that pointer differently (see `update()`'s local
+   * `index` vs. `onFretDown`'s direct array write).
+   */
+  private applyHit(note: JudgedNote, fret: number, songTimeMs: number, judgment: HitJudgment, deltaMs: number): HitResult {
     this.notesHit++;
     this.combo++;
     this.longestCombo = Math.max(this.longestCombo, this.combo);
@@ -180,8 +211,14 @@ export class GameplayEngine {
       note.state = NoteRuntimeState.Hit;
     }
 
-    const deltaMs = songTimeMs - note.timeMs;
     return { kind: "hit", noteId: note.id, fret, judgment, deltaMs, pointsAwarded, combo: this.combo, multiplier };
+  }
+
+  /** The chart note immediately preceding `note` in full chart (time-sorted)
+   * order — `notes` is indexed exactly by `id`, so this is a direct lookup,
+   * not a search. Used by Etapa 6.1's HOPO eligibility check. */
+  private previousNote(note: JudgedNote): JudgedNote | null {
+    return note.id > 0 ? this.notes[note.id - 1] : null;
   }
 
   /**

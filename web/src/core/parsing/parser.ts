@@ -47,6 +47,35 @@ export function getGemIndexForDifficulty(difficult: Difficult, midiNote: number)
   return GEMS_BY_DIFFICULTY[difficult].indexOf(midiNote);
 }
 
+/**
+ * Etapa 6.1's HOPO/tap marker notes: the FoF/Clone Hero `.mid` convention,
+ * confirmed against the 8 bundled charts in `musica/` (see
+ * docs/web-port-plan.md, Etapa 6.1 — none of it is guessed, every offset
+ * below was checked to coincide with real gem-note onsets in every one of
+ * those songs' Guitar/Bass tracks before being hard-coded here). Both are
+ * defined *per difficulty*, 5 and 6 semitones above that difficulty's
+ * lowest gem note: e.g. Expert's gems are 96-100, so its force marker is
+ * 101 and its tap marker is 102. A marker note's own duration is a *span*:
+ * every gem note of that same difficulty whose onset falls within
+ * [markerStart, markerStart+markerDuration] is marked by it — not just one
+ * note at the marker's exact start tick.
+ */
+const FORCE_MARKER_OFFSET = 5;
+const TAP_MARKER_OFFSET = 6;
+
+/** The MIDI note that toggles a difficulty's natural HOPO/strum
+ * determination for every gem note within its span (see
+ * `FORCE_MARKER_OFFSET`'s doc comment). */
+export function getForceMarkerNote(difficult: Difficult): number {
+  return GEMS_BY_DIFFICULTY[difficult][0] + FORCE_MARKER_OFFSET;
+}
+
+/** The MIDI note that marks every gem note within its span, for this
+ * difficulty, as a tap note (see `FORCE_MARKER_OFFSET`'s doc comment). */
+export function getTapMarkerNote(difficult: Difficult): number {
+  return GEMS_BY_DIFFICULTY[difficult][0] + TAP_MARKER_OFFSET;
+}
+
 export interface GemLookup {
   index: number;
   difficult: Difficult;

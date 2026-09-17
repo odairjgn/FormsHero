@@ -70,4 +70,16 @@ export interface ChartNote {
   fret: number;
   /** Sustain length in milliseconds; 0 for a note with no hold. */
   sustainMs: number;
+  /** Etapa 6.1: true if this note is a hammer-on/pull-off — hittable
+   * without a fresh strum, given the previous chart note was hit and this
+   * note's fret differs from it. Either read straight off the chart's
+   * explicit "force HOPO" marker, or, absent one, derived from the classic
+   * natural-HOPO rule (close enough to the previous note, different fret).
+   * See `extractChartNotes` for how each is decided. */
+  isHopo: boolean;
+  /** Etapa 6.1: true if this note is a tap note — always hittable without a
+   * strum, regardless of what came before (the trait that sets it apart
+   * from `isHopo`). Read off the chart's explicit "tap" marker; there's no
+   * natural/implicit tap rule the way there is for HOPO. */
+  isTap: boolean;
 }

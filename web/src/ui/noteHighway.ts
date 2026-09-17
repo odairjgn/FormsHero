@@ -192,11 +192,48 @@ export class NoteHighway {
     if (wasJudged) return; // already crossed the hit line — nothing left to draw for the head itself
 
     const headY = this.timeToY(note.timeMs, songTimeMs, hitLineY);
+    this.drawNoteHead(cx, headY, isDimmed ? "#555555" : color, isDimmed, note.isHopo, note.isTap);
+  }
+
+  /**
+   * Etapa 6.1's visual half — the classic Guitar Hero/Rock Band note-shape
+   * language, so a HOPO/tap note reads at a glance instead of only being a
+   * timing-window difference the player has to memorize per song:
+   * - A strum note is the plain colored circle with a black outline (same
+   *   as before this existed).
+   * - A HOPO note keeps the circle but swaps the outline for a white halo —
+   *   "no strum needed", same shape so it doesn't compete with fret-color
+   *   recognition at speed.
+   * - A tap note is drawn as a diamond, the shape GH/RB games use for it —
+   *   distinct at a glance since taps don't even need the previous note to
+   *   have been hit (see `isAutoHitEligible`).
+   * `isTap` wins over `isHopo` when a chart marks a note as both (rare, but
+   * not impossible — see `extractChartNotes`): the diamond shape already
+   * implies "no strum, no predecessor needed", the more permissive of the two.
+   */
+  private drawNoteHead(cx: number, cy: number, fillColor: string, isDimmed: boolean, isHopo: boolean, isTap: boolean): void {
+    const { ctx } = this;
+
     ctx.beginPath();
-    ctx.arc(cx, headY, NOTE_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = isDimmed ? "#555555" : color;
+    if (isTap) {
+      ctx.moveTo(cx, cy - NOTE_RADIUS);
+      ctx.lineTo(cx + NOTE_RADIUS, cy);
+      ctx.lineTo(cx, cy + NOTE_RADIUS);
+      ctx.lineTo(cx - NOTE_RADIUS, cy);
+      ctx.closePath();
+    } else {
+      ctx.arc(cx, cy, NOTE_RADIUS, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = fillColor;
     ctx.fill();
-    ctx.strokeStyle = "black";
+
+    if (!isDimmed && (isHopo || isTap)) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    } else {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "black";
+    }
     ctx.stroke();
   }
 }

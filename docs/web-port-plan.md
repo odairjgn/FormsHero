@@ -81,19 +81,36 @@ referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/
 `ui/screens` (Etapa 4 — `songSelectScreen`, `preGameScreen`, `gameplayScreen`, `resultsScreen`,
 `settingsScreen`), `core/settings` (Etapa 5 — `calibration.ts`, `highScores.ts`, `gameSettings.ts`).
 
-#### 6.1 — HOPO / tap notes
+#### 6.1 — HOPO / tap notes — ✅ feito
 - **O que é**: notas hammer-on/pull-off (e tap notes) podem ser acertadas sem repicar
   (sem nova pressão de tecla), desde que a nota anterior tenha sido acertada e a
   próxima esteja dentro de uma janela curta — regra clássica de Guitar Hero/Clone Hero.
-- **Onde mexe**: `core/parsing/chartNotes.ts` (o formato FoF/Clone Hero marca HOPO via
-  nota MIDI 1 de "sustenido" um semitom acima da gema, ou flag de tap via texto/sysex —
-  checar como o `notes.mid` das 8 músicas de `musica/` marca isso antes de decidir o
-  parsing; **não pode virar campo inventado que não reflita o chart real**, é o mesmo
-  dado que Clone Hero lê). Adicionar `isHopo`/`isTap` em `ChartNote` (`core/parsing/types.ts`)
-  e `core/gameplay/types.ts` (`JudgedNote` herda). Nova regra em `judgment.ts`: permitir
-  hit sem keypress novo se a nota anterior foi `Hit`/`SustainCompleted` e o fret muda.
-- **Depende de**: nada além do motor atual — é uma extensão de `judgment.ts`.
-- **Teste**: casos determinísticos em `judgment.test.ts` com sequência hit→HOPO→miss.
+- **Como foi implementado**: checado empiricamente contra o `notes.mid` das 8 músicas
+  de `musica/` (script descartável, não commitado) antes de decidir o parsing —
+  confirmado que o formato usa, por dificuldade, dois marcadores MIDI 5 e 6 semitons
+  acima da gema mais grave dessa dificuldade (ex.: Expert 96-100 → force=101, tap=102),
+  cada um como uma nota cuja duração é um *span*: toda gema daquela dificuldade cujo
+  início cai dentro do span é afetada. `core/parsing/parser.ts` ganhou
+  `getForceMarkerNote`/`getTapMarkerNote`. `core/parsing/chartNotes.ts`
+  (`extractChartNotes`) calcula HOPO natural (fret diferente do anterior + distância
+  ≤ 1/3 de nota de um quarto em ticks, o default documentado do Clone Hero/Moonscraper
+  quando `song.ini` não define `hopofreq` — nenhuma das 8 músicas define), e o marcador
+  de força inverte esse resultado quando presente; o marcador de tap seta `isTap`
+  independentemente. `ChartNote` (`core/parsing/types.ts`) ganhou `isHopo`/`isTap`;
+  `JudgedNote` (`core/gameplay/types.ts`) herda ambos sem mudança própria. Nova função
+  `isAutoHitEligible` em `core/gameplay/judgment.ts`: tap é elegível sem condição; HOPO
+  exige que a nota anterior do chart (`notes[id-1]`) tenha resolvido como
+  `Hit`/`SustainCompleted` (não `Holding`) e que o fret mude.
+  `core/gameplay/gameplayEngine.ts`: `update()` agora tenta o auto-hit (via novo método
+  privado `applyHit`, compartilhado com `onFretDown`) antes de checar o timeout de miss,
+  resolvendo a nota como `Hit`/`Perfect` no exato `timeMs` da nota, sem exigir
+  `onFretDown`.
+- **Depende de**: nada além do motor atual — é uma extensão de
+  `judgment.ts`/`gameplayEngine.ts`.
+- **Teste**: `chartNotes.test.ts` (marcadores de força/tap sintéticos + contra o chart
+  real da Joan Jett), `judgment.test.ts` (`isAutoHitEligible` isolado) e
+  `gameplayEngine.test.ts` (bloco "HOPO/tap auto-hit (Etapa 6.1)": sequência
+  hit→HOPO→miss, tap sem predecessor, `Holding` não conta como predecessor válido).
 
 #### 6.2 — Star power / overdrive
 - **O que é**: trechos do chart marcados como "fase de star power" (no MIDI, nota 116

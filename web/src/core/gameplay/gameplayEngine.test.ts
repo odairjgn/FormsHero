@@ -4,7 +4,7 @@ import { HitJudgment, NoteRuntimeState } from "./types.ts";
 import type { ChartNote } from "../parsing/types.ts";
 
 function note(overrides: Partial<ChartNote> = {}): ChartNote {
-  return { timeMs: 1000, fret: 0, sustainMs: 0, ...overrides };
+  return { timeMs: 1000, fret: 0, sustainMs: 0, isHopo: false, isTap: false, ...overrides };
 }
 
 describe("GameplayEngine construction", () => {
@@ -258,6 +258,105 @@ describe("GameplayEngine — sustains", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
     expect(() => engine.onFretUp(0, 1000)).not.toThrow();
     expect(engine.getStats().score).toBe(0);
+  });
+});
+
+describe("GameplayEngine — HOPO/tap auto-hit (Etapa 6.1)", () => {
+  it("auto-hits a HOPO note via update() once the previous note was hit and the fret differs", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0 }),
+      note({ timeMs: 1200, fret: 1, isHopo: true }),
+    ]);
+
+    engine.onFretDown(0, 1000);
+    engine.update(1200); // no fret-1 keypress at all
+
+    expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Hit);
+    expect(engine.getNotes()[1].judgment).toBe(HitJudgment.Perfect);
+    expect(engine.getStats().notesHit).toBe(2);
+    expect(engine.getStats().combo).toBe(2);
+  });
+
+  it("does not auto-hit a HOPO note if the previous note wasn't hit — it still times out as a miss", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0 }),
+      note({ timeMs: 1200, fret: 1, isHopo: true }),
+    ]);
+
+    engine.update(1000); // note 0 never pressed
+    engine.update(1360); // note 1's OK window (1350) elapses too
+
+    expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Missed);
+    expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Missed);
+  });
+
+  it("does not auto-hit a HOPO note repeating the previous note's fret — that still needs a real press", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0 }),
+      note({ timeMs: 1200, fret: 0, isHopo: true }),
+    ]);
+
+    engine.onFretDown(0, 1000);
+    engine.update(1360); // note 1's OK window elapses unpressed
+
+    expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Missed);
+  });
+
+  it("does not treat a sustain still being held (Holding, not SustainCompleted) as a hit predecessor", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0, sustainMs: 5000 }),
+      note({ timeMs: 1200, fret: 1, isHopo: true }),
+    ]);
+
+    engine.onFretDown(0, 1000); // -> Holding, sustain doesn't end until 6000
+    engine.update(1360); // note 1's OK window elapses while note 0 is still Holding
+
+    expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Missed);
+  });
+
+  it("auto-hits a tap note unconditionally, even as the very first note in the chart", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 2, isTap: true })]);
+
+    engine.update(1000);
+
+    expect(engine.getNotes()[0].state).toBe(NoteRuntimeState.Hit);
+    expect(engine.getNotes()[0].judgment).toBe(HitJudgment.Perfect);
+  });
+
+  it("auto-hits a tap note even repeating the previous note's fret (unlike a HOPO)", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0 }),
+      note({ timeMs: 1200, fret: 0, isTap: true }),
+    ]);
+
+    engine.onFretDown(0, 1000);
+    engine.update(1200);
+
+    expect(engine.getNotes()[1].state).toBe(NoteRuntimeState.Hit);
+  });
+
+  it("chains a hit into a HOPO into a miss, breaking combo only on the miss", () => {
+    const engine = new GameplayEngine([
+      note({ timeMs: 1000, fret: 0 }),
+      note({ timeMs: 1200, fret: 1, isHopo: true }),
+      note({ timeMs: 3000, fret: 2 }), // too far to be a HOPO target of note 1, and never marked isHopo
+    ]);
+
+    engine.onFretDown(0, 1000); // hit
+    engine.update(1200); // HOPO auto-hits
+    expect(engine.getStats().combo).toBe(2);
+
+    engine.update(3160); // note 3's OK window elapses unpressed -> miss
+    expect(engine.getNotes()[2].state).toBe(NoteRuntimeState.Missed);
+    expect(engine.getStats().combo).toBe(0);
+  });
+
+  it("a keypress still works normally on a HOPO/tap note — auto-hit isn't the only way to hit it", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0, isTap: true })]);
+
+    const result = engine.onFretDown(0, 1010);
+
+    expect(result).toMatchObject({ kind: "hit", judgment: HitJudgment.Perfect });
   });
 });
 
