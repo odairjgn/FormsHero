@@ -51,6 +51,7 @@ export class GameplayEngine {
   private readonly comboMultiplierThresholds: readonly number[];
   private readonly rockMeterGainPerHit: number;
   private readonly rockMeterLossPerMiss: number;
+  private readonly godMode: boolean;
 
   private score = 0;
   private combo = 0;
@@ -68,6 +69,7 @@ export class GameplayEngine {
     this.rockMeterGainPerHit = options.rockMeterGainPerHit ?? DEFAULT_ROCK_METER_GAIN_PER_HIT;
     this.rockMeterLossPerMiss = options.rockMeterLossPerMiss ?? DEFAULT_ROCK_METER_LOSS_PER_MISS;
     this.rockMeter = clampRockMeter(options.rockMeterStartValue ?? DEFAULT_ROCK_METER_START);
+    this.godMode = options.godMode ?? false;
 
     this.notes = chartNotes.map((note, id) => ({ ...note, id, state: NoteRuntimeState.Pending, judgment: null }));
     this.notesByFret = Array.from({ length: FRET_COUNT }, () => []);
@@ -95,7 +97,7 @@ export class GameplayEngine {
       notesTotal: this.notes.length,
       accuracy: attempts === 0 ? 1 : this.notesHit / attempts,
       rockMeter: this.rockMeter,
-      failed: this.rockMeter <= 0,
+      failed: !this.godMode && this.rockMeter <= 0,
     };
   }
 

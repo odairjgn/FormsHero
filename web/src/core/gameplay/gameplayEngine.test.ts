@@ -392,6 +392,17 @@ describe("GameplayEngine — rock meter (Etapa 6.3)", () => {
     expect(engine.getStats().failed).toBe(true);
   });
 
+  it("godMode keeps the rock meter moving but never reports failed", () => {
+    const notes = Array.from({ length: 10 }, (_, i) => note({ timeMs: (i + 1) * 1000, fret: 0 }));
+    const engine = new GameplayEngine(notes, { godMode: true });
+
+    for (let i = 0; i < 9; i++) {
+      engine.update((i + 1) * 1000 + 200); // each note's OK window elapses unpressed
+    }
+    expect(engine.getStats().rockMeter).toBe(0); // meter still bottoms out...
+    expect(engine.getStats().failed).toBe(false); // ...but god mode suppresses failure
+  });
+
   it("honors custom start value and rates", () => {
     const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })], {
       rockMeterStartValue: 10,

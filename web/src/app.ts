@@ -49,6 +49,10 @@ interface LoadedSong {
 export function startApp(container: HTMLElement): void {
   let audioContext: AudioContext | null = null;
   let stopActiveGameplay: (() => void) | null = null;
+  // Remembered so "jogar novamente" on the results screen reuses whatever
+  // god-mode toggle the player picked on the pre-game screen, instead of
+  // silently reverting to off.
+  let lastGodMode = false;
   // Etapa 5 tuning/calibration, loaded once and kept in memory — reloaded
   // from `localStorage` only at startup, written back on every save from
   // the settings screen (see `showSettings`).
@@ -124,12 +128,13 @@ export function startApp(container: HTMLElement): void {
     leaveGameplay();
     renderPreGameScreen(container, loaded.song, loaded.parts, {
       onBack: showSongSelect,
-      onStart: (part, difficult) => showGameplay(loaded, part, difficult),
+      onStart: (part, difficult, godMode) => showGameplay(loaded, part, difficult, godMode),
       getHighScore: (part, difficult) => loadHighScore(window.localStorage, songHighScoreKey(loaded, part, difficult)),
     });
   }
 
-  function showGameplay(loaded: LoadedSong, part: Part, difficult: Difficult): void {
+  function showGameplay(loaded: LoadedSong, part: Part, difficult: Difficult, godMode: boolean): void {
+    lastGodMode = godMode;
     const notes = extractChartNotes(loaded.midi, part.index, difficult);
     stopActiveGameplay = startGameplayScreen(container, {
       audioEngine: loaded.audioEngine,
@@ -138,6 +143,7 @@ export function startApp(container: HTMLElement): void {
       hitWindowsMs: settings.hitWindowsMs,
       scrollPxPerMs: settings.scrollPxPerMs,
       inputOffsetMs: settings.calibrationOffsetMs,
+      godMode,
       onFinished: (stats) => {
         stopActiveGameplay = null;
         showResults(loaded, part, difficult, stats, false);
@@ -168,7 +174,7 @@ export function startApp(container: HTMLElement): void {
     });
 
     renderResultsScreen(container, loaded.song, part, difficult, stats, record, failed, {
-      onPlayAgain: () => showGameplay(loaded, part, difficult),
+      onPlayAgain: () => showGameplay(loaded, part, difficult, lastGodMode),
       onBackToSongSelect: showSongSelect,
     });
   }

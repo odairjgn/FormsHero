@@ -132,4 +132,9 @@ export interface GameplayEngineOptions {
   /** Applied on both a timed-out miss and a wrong press — the plan's
    * "-6 por miss/wrong-press" treats them the same. */
   readonly rockMeterLossPerMiss?: number;
+  /** God mode: the rock meter still rises/falls normally (so the HUD's
+   * "Energia" reading stays meaningful), but `GameplayStats.failed` never
+   * flips to `true` — a practice/debug toggle to play a song end-to-end
+   * without a miss streak cutting it short. Defaults to `false`. */
+  readonly godMode?: boolean;
 }

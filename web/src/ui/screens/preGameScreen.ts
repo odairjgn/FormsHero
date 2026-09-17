@@ -10,7 +10,7 @@ import type { HighScoreEntry } from "../../core/settings/index.ts";
 import { escapeHtml, songDisplayTitle } from "./formatting.ts";
 
 export interface PreGameCallbacks {
-  onStart(part: Part, difficult: Difficult): void;
+  onStart(part: Part, difficult: Difficult, godMode: boolean): void;
   onBack(): void;
   /** Etapa 5's "recordes por música/dificuldade" — looked up per selection
    * rather than passed in bulk, since the caller owns `localStorage` access
@@ -36,6 +36,7 @@ export function renderPreGameScreen(
           ? `
         <label for="part-select">Instrumento/dificuldade:</label>
         <select id="part-select"></select>
+        <label><input type="checkbox" id="god-mode-check" /> God mode (não perde a música)</label>
         <p id="high-score" class="status"></p>
         <p>Teclas: D F J K L (verde / vermelho / amarelo / azul / laranja)</p>
         <button id="start-btn" type="button">Iniciar jogo</button>
@@ -49,6 +50,7 @@ export function renderPreGameScreen(
   if (!hasOptions) return;
 
   const partSelect = container.querySelector<HTMLSelectElement>("#part-select")!;
+  const godModeCheck = container.querySelector<HTMLInputElement>("#god-mode-check")!;
   const highScoreEl = container.querySelector<HTMLParagraphElement>("#high-score")!;
   for (const part of parts) {
     for (const difficult of part.availableDifficulties) {
@@ -78,6 +80,6 @@ export function renderPreGameScreen(
 
   container.querySelector<HTMLButtonElement>("#start-btn")!.addEventListener("click", () => {
     const selected = selectedPart();
-    if (selected) callbacks.onStart(selected.part, selected.difficult);
+    if (selected) callbacks.onStart(selected.part, selected.difficult, godModeCheck.checked);
   });
 }
