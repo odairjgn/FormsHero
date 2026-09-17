@@ -80,8 +80,17 @@ export class NoteHighway {
    * `GameplayEngine` judges against (see docs/web-port-plan.md's
    * shared-clock rationale in Etapa 2), so what's drawn always matches
    * what's judgeable.
+   *
+   * `starPowerActive` (Etapa 6.2) is purely cosmetic here — a golden glow
+   * around the highway while it's spent, so the doubled-score window reads
+   * at a glance without the player having to watch the HUD number.
    */
-  render(notes: readonly JudgedNote[], songTimeMs: number, hitEffects: readonly HitEffect[] = []): void {
+  render(
+    notes: readonly JudgedNote[],
+    songTimeMs: number,
+    hitEffects: readonly HitEffect[] = [],
+    starPowerActive: boolean = false,
+  ): void {
     const { ctx, canvas } = this;
     const laneWidth = canvas.width / FRET_COLORS.length;
     const hitLineY = canvas.height - 60;
@@ -92,6 +101,7 @@ export class NoteHighway {
 
     this.drawLanes(laneWidth);
     this.drawHitLine(laneWidth, hitLineY);
+    if (starPowerActive) this.drawStarPowerGlow();
 
     for (const note of notes) {
       // `notes` is time-ordered (see `GameplayEngine`'s constructor), so
@@ -120,6 +130,20 @@ export class NoteHighway {
       ctx.lineTo(fret * laneWidth, canvas.height);
       ctx.stroke();
     }
+  }
+
+  /** Etapa 6.2's "highway brilhando" while star power is active: a soft
+   * gold vignette along the canvas edges, layered under the lanes/notes
+   * (drawn right after the background) so it reads as ambient light rather
+   * than obscuring gameplay. */
+  private drawStarPowerGlow(): void {
+    const { ctx, canvas } = this;
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, "rgba(255, 210, 80, 0.25)");
+    gradient.addColorStop(0.5, "rgba(255, 210, 80, 0.05)");
+    gradient.addColorStop(1, "rgba(255, 210, 80, 0.25)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   private drawHitLine(laneWidth: number, hitLineY: number): void {
@@ -193,6 +217,17 @@ export class NoteHighway {
 
     const headY = this.timeToY(note.timeMs, songTimeMs, hitLineY);
     this.drawNoteHead(cx, headY, isDimmed ? "#555555" : color, isDimmed, note.isHopo, note.isTap);
+
+    // Etapa 6.2: a thin gold ring marks which notes belong to a star power
+    // phrase — the only way to tell, at a glance, which notes to nail to
+    // fill the bar (missing even one fails that whole phrase's chunk).
+    if (!isDimmed && note.starPowerPhraseId !== null) {
+      ctx.beginPath();
+      ctx.arc(cx, headY, NOTE_RADIUS + 5, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255, 210, 80, 0.9)";
+      ctx.stroke();
+    }
   }
 
   /**

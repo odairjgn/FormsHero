@@ -108,6 +108,11 @@ export interface GameplayStats {
    * the caller (`ui/screens/gameplayScreen.ts`) to notice this flag and end
    * the playthrough, same as it already ends one that reaches its last note. */
   readonly failed: boolean;
+  /** Etapa 6.2's star power/overdrive: `available` is the meter (0-100,
+   * starts empty, filled by fully-hit phrases — see `activateStarPower`'s
+   * doc comment on `GameplayEngine`); `active` is true while it's being
+   * spent (doubled score, draining over real time). */
+  readonly starPower: { readonly available: number; readonly active: boolean };
 }
 
 /** Port of the plan's "janelas de tempo (ex.: Perfeito ±35ms, Bom ±90ms,
@@ -137,4 +142,11 @@ export interface GameplayEngineOptions {
    * flips to `true` — a practice/debug toggle to play a song end-to-end
    * without a miss streak cutting it short. Defaults to `false`. */
   readonly godMode?: boolean;
+  /** Etapa 6.2: bar points (0-100 scale) awarded for fully hitting one star
+   * power phrase (every gem note under one MIDI note-116 span, none
+   * missed) — see `DEFAULT_STAR_POWER_GAIN_PER_PHRASE`. */
+  readonly starPowerGainPerPhrase?: number;
+  /** Etapa 6.2: how fast the star power meter drains, per second of song
+   * time, once activated — see `DEFAULT_STAR_POWER_DRAIN_PER_SECOND`. */
+  readonly starPowerDrainPerSecond?: number;
 }

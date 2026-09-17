@@ -15,6 +15,22 @@ export const DEFAULT_ROCK_METER_START = 50;
 export const DEFAULT_ROCK_METER_GAIN_PER_HIT = 2;
 export const DEFAULT_ROCK_METER_LOSS_PER_MISS = 6;
 
+// Etapa 6.2's star power/overdrive meter (0-100, starts empty — unlike the
+// rock meter, there's no head start here, it has to be earned). Filling a
+// whole phrase (every gem note under one MIDI note-116 span hit, none
+// missed) awards a fixed chunk; the default is sized so 5 fully-hit phrases
+// fill the bar, same ballpark as classic Guitar Hero's "chunky" phrase
+// meter. Once activated it drains over real time until empty, sized here so
+// a full bar buys ~8 seconds of doubled points — long enough to matter,
+// short enough that it's spent deliberately rather than left running.
+export const STAR_POWER_MIN = 0;
+export const STAR_POWER_MAX = 100;
+export const DEFAULT_STAR_POWER_GAIN_PER_PHRASE = 20;
+export const DEFAULT_STAR_POWER_DRAIN_PER_SECOND = 100 / 8;
+/** Score multiplier while star power is active — stacks multiplicatively
+ * with the combo multiplier (e.g. combo x2 while active scores as x4). */
+export const STAR_POWER_MULTIPLIER = 2;
+
 /**
  * Combo multiplier for a given combo count: starts at 1x and steps up by
  * one for every threshold reached. With the default 3 thresholds this caps
@@ -49,4 +65,11 @@ export function computeSustainPoints(
  * applies whether it just gained from a hit or lost from a miss. */
 export function clampRockMeter(value: number): number {
   return Math.min(ROCK_METER_MAX, Math.max(ROCK_METER_MIN, value));
+}
+
+/** Clamps a star power meter value to its `[0, 100]` range — same shape as
+ * `clampRockMeter`, kept as its own function since the two meters have
+ * independent ranges/semantics that happen to coincide today. */
+export function clampStarPower(value: number): number {
+  return Math.min(STAR_POWER_MAX, Math.max(STAR_POWER_MIN, value));
 }

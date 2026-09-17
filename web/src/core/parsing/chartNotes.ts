@@ -7,7 +7,7 @@
 // work the C# side never had to do (it only ever visualized raw events).
 
 import type { Midi } from "@tonejs/midi";
-import { getForceMarkerNote, getGemIndexForDifficulty, getTapMarkerNote } from "./parser.ts";
+import { STAR_POWER_MARKER_NOTE, getForceMarkerNote, getGemIndexForDifficulty, getTapMarkerNote } from "./parser.ts";
 import type { ChartNote, Difficult } from "./types.ts";
 
 type MidiNote = Midi["tracks"][number]["notes"][number];
@@ -41,6 +41,18 @@ function isWithinAnySpan(ticks: number, spans: readonly MarkerSpan[]): boolean {
 }
 
 /**
+ * Etapa 6.2: which span (by index) `ticks` falls within, or `null` if none.
+ * Spans must already be sorted by `startTicks` — the index doubles as the
+ * phrase's chart-order id (`ChartNote.starPowerPhraseId`), so the order
+ * matters, not just membership (unlike `isWithinAnySpan`, which only cares
+ * about the force/tap markers' yes/no effect).
+ */
+function spanIndexContaining(ticks: number, spans: readonly MarkerSpan[]): number | null {
+  const index = spans.findIndex((span) => ticks >= span.startTicks && ticks <= span.endTicks);
+  return index === -1 ? null : index;
+}
+
+/**
  * Extracts one instrument track's notes for a single difficulty as an
  * ordered, judgeable note list.
  *
@@ -54,6 +66,11 @@ export function extractChartNotes(midi: Midi, trackIndex: number, difficult: Dif
 
   const forceSpans = collectMarkerSpans(track.notes, getForceMarkerNote(difficult));
   const tapSpans = collectMarkerSpans(track.notes, getTapMarkerNote(difficult));
+  // Not per-difficulty (see `STAR_POWER_MARKER_NOTE`'s doc comment), and
+  // sorted so a span's index is a stable, chart-order phrase id.
+  const starPowerSpans = collectMarkerSpans(track.notes, STAR_POWER_MARKER_NOTE).sort(
+    (a, b) => a.startTicks - b.startTicks,
+  );
   const thresholdTicks = naturalHopoThresholdTicks(midi.header.ppq);
 
   const gems = track.notes
@@ -82,6 +99,7 @@ export function extractChartNotes(midi: Midi, trackIndex: number, difficult: Dif
       sustainMs: note.duration * 1000,
       isHopo,
       isTap,
+      starPowerPhraseId: spanIndexContaining(note.ticks, starPowerSpans),
     });
 
     previous = gem;

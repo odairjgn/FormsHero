@@ -39,6 +39,7 @@ function judgedNote(overrides: Partial<JudgedNote> = {}): JudgedNote {
     sustainMs: 0,
     isHopo: false,
     isTap: false,
+    starPowerPhraseId: null,
     state: NoteRuntimeState.Pending,
     judgment: null,
     ...overrides,

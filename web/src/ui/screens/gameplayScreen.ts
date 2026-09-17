@@ -95,14 +95,21 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     onFretUp: (fret) => {
       gameplayEngine.onFretUp(fret, judgeTimeMs());
     },
+    onActivateStarPower: () => {
+      gameplayEngine.activateStarPower();
+    },
   });
 
   function renderHud(stats: GameplayStats): void {
     const accuracyPct = (stats.accuracy * 100).toFixed(1);
+    const starPowerText = stats.starPower.active
+      ? `ATIVO (${Math.round(stats.starPower.available)}%)`
+      : `${Math.round(stats.starPower.available)}%`;
     hudEl.textContent =
       `Score: ${stats.score} | Combo: ${stats.combo} (recorde ${stats.longestCombo}) | ` +
       `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal}) | ` +
-      `Erros: ${stats.notesMissed + stats.wrongPresses} | Energia: ${stats.rockMeter}%` +
+      `Erros: ${stats.notesMissed + stats.wrongPresses} | Energia: ${stats.rockMeter}% | ` +
+      `Star Power: ${starPowerText} (espaço p/ ativar)` +
       (godMode ? " | GOD MODE" : "");
   }
 
@@ -121,7 +128,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     hitEffects = hitEffects.filter((effect) => now - effect.spawnedAtMs <= HIT_EFFECT_DURATION_MS);
 
     const stats = gameplayEngine.getStats();
-    noteHighway.render(gameplayEngine.getNotes(), songTimeMs, hitEffects);
+    noteHighway.render(gameplayEngine.getNotes(), songTimeMs, hitEffects, stats.starPower.active);
     renderHud(stats);
 
     // Rock meter failure (Etapa 6.3) ends the song early, same as reaching

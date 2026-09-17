@@ -4,7 +4,7 @@ import { HitJudgment, NoteRuntimeState } from "./types.ts";
 import type { ChartNote } from "../parsing/types.ts";
 
 function note(overrides: Partial<ChartNote> = {}): ChartNote {
-  return { timeMs: 1000, fret: 0, sustainMs: 0, isHopo: false, isTap: false, ...overrides };
+  return { timeMs: 1000, fret: 0, sustainMs: 0, isHopo: false, isTap: false, starPowerPhraseId: null, ...overrides };
 }
 
 describe("GameplayEngine construction", () => {
@@ -24,6 +24,7 @@ describe("GameplayEngine construction", () => {
       accuracy: 1,
       rockMeter: 50,
       failed: false,
+      starPower: { available: 0, active: false },
     });
   });
 
@@ -413,5 +414,95 @@ describe("GameplayEngine — rock meter (Etapa 6.3)", () => {
     engine.onFretDown(1, 1000); // wrong press -> -20, clamped at 0
     expect(engine.getStats().rockMeter).toBe(0);
     expect(engine.getStats().failed).toBe(true);
+  });
+});
+
+describe("GameplayEngine — star power (Etapa 6.2)", () => {
+  function phrasedNote(overrides: Partial<ChartNote> = {}): ChartNote {
+    return note({ starPowerPhraseId: 0, ...overrides });
+  }
+
+  it("awards no bar for a phrase with unresolved notes", () => {
+    const engine = new GameplayEngine([phrasedNote({ timeMs: 1000, fret: 0 }), phrasedNote({ timeMs: 1200, fret: 1 })]);
+    engine.onFretDown(0, 1000);
+    expect(engine.getStats().starPower.available).toBe(0);
+  });
+
+  it("awards the phrase's bar chunk once every one of its notes is hit", () => {
+    const engine = new GameplayEngine(
+      [phrasedNote({ timeMs: 1000, fret: 0 }), phrasedNote({ timeMs: 1200, fret: 1 })],
+      { starPowerGainPerPhrase: 20 },
+    );
+    engine.onFretDown(0, 1000);
+    expect(engine.getStats().starPower.available).toBe(0); // 1 of 2 notes done
+    engine.onFretDown(1, 1200);
+    expect(engine.getStats().starPower.available).toBe(20); // phrase complete
+  });
+
+  it("never awards a phrase that had any missed note, even once every note resolves", () => {
+    const engine = new GameplayEngine(
+      [phrasedNote({ timeMs: 1000, fret: 0 }), phrasedNote({ timeMs: 1200, fret: 1 })],
+      { starPowerGainPerPhrase: 20 },
+    );
+    engine.update(1150); // note at 1000's OK window elapses unpressed -> miss, phrase failed
+    engine.onFretDown(1, 1200); // hit the phrase's other note
+    expect(engine.getStats().starPower.available).toBe(0);
+  });
+
+  it("notes outside any phrase (starPowerPhraseId null) never contribute to the bar", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })], { starPowerGainPerPhrase: 20 });
+    engine.onFretDown(0, 1000);
+    expect(engine.getStats().starPower.available).toBe(0);
+  });
+
+  it("activateStarPower is a no-op with an empty bar", () => {
+    const engine = new GameplayEngine([note({ timeMs: 1000, fret: 0 })]);
+    engine.activateStarPower();
+    expect(engine.getStats().starPower.active).toBe(false);
+  });
+
+  it("activates once the bar has anything in it, and doubles the combo multiplier while active", () => {
+    const engine = new GameplayEngine(
+      [phrasedNote({ timeMs: 1000, fret: 0 }), note({ timeMs: 1200, fret: 1 })],
+      { starPowerGainPerPhrase: 20 },
+    );
+    engine.onFretDown(0, 1000); // completes the (single-note) phrase -> bar = 20
+    engine.activateStarPower();
+    expect(engine.getStats().starPower.active).toBe(true);
+
+    const result = engine.onFretDown(1, 1200);
+    expect(result).toMatchObject({ kind: "hit", multiplier: 2 }); // combo x1 * star power x2
+  });
+
+  it("drains proportionally to real elapsed song time and deactivates once empty", () => {
+    const engine = new GameplayEngine([phrasedNote({ timeMs: 1000, fret: 0 })], {
+      starPowerGainPerPhrase: 20,
+      starPowerDrainPerSecond: 10,
+    });
+    engine.onFretDown(0, 1000); // bar = 20
+    engine.activateStarPower();
+
+    engine.update(1000); // primes the drain clock, no elapsed time yet
+    expect(engine.getStats().starPower.available).toBe(20);
+
+    engine.update(1500); // +0.5s * 10/s = -5
+    expect(engine.getStats().starPower.available).toBe(15);
+
+    engine.update(3000); // +1.5s * 10/s = -15, clamped at 0 -> deactivates
+    expect(engine.getStats().starPower.available).toBe(0);
+    expect(engine.getStats().starPower.active).toBe(false);
+  });
+
+  it("doubles sustain points while active", () => {
+    const engine = new GameplayEngine([phrasedNote({ timeMs: 1000, fret: 0, sustainMs: 1000 })], {
+      starPowerGainPerPhrase: 20,
+      sustainPointsPerSecond: 100,
+    });
+    engine.onFretDown(0, 1000); // completes the phrase -> bar = 20, also starts the sustain hold
+    engine.activateStarPower();
+    const scoreAfterHit = engine.getStats().score;
+
+    engine.onFretUp(0, 1500); // held 500ms -> 50 base sustain points, doubled to 100 by star power
+    expect(engine.getStats().score - scoreAfterHit).toBe(100);
   });
 });

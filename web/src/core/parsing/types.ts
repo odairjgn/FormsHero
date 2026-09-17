@@ -82,4 +82,9 @@ export interface ChartNote {
    * from `isHopo`). Read off the chart's explicit "tap" marker; there's no
    * natural/implicit tap rule the way there is for HOPO. */
   isTap: boolean;
+  /** Etapa 6.2: which star power/overdrive phrase (0-based, in the order
+   * phrases occur in the chart) this note belongs to, or `null` if it falls
+   * outside every phrase. See `extractChartNotes` for how phrases are read
+   * off the MIDI's note-116 marker spans. */
+  starPowerPhraseId: number | null;
 }

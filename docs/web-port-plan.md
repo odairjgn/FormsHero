@@ -112,19 +112,45 @@ referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/
   `gameplayEngine.test.ts` (bloco "HOPO/tap auto-hit (Etapa 6.1)": sequência
   hit→HOPO→miss, tap sem predecessor, `Holding` não conta como predecessor válido).
 
-#### 6.2 — Star power / overdrive
+#### 6.2 — Star power / overdrive — ✅ feito
 - **O que é**: trechos do chart marcados como "fase de star power" (no MIDI, nota 116
   no FoF/Clone Hero); ao acertar 100% das notas de uma fase, o jogador acumula uma
   barra; ativá-la (tecla dedicada, ex. barra de espaço) dobra o multiplicador de
   pontos por um tempo.
-- **Onde mexe**: `core/parsing/chartNotes.ts` para extrair as fases de SP (nota 116)
-  como `{ startMs, endMs }[]`; `core/gameplay/scoring.ts` para o multiplicador dobrado
-  enquanto ativo; `core/gameplay/gameplayEngine.ts` expõe `activateStarPower()` e o
-  estado da barra em `GameplayStats` (novo campo `starPower: { available: number; active: boolean }`);
-  `ui/screens/gameplayScreen.ts` + `ui/keyboardInput.ts` para a tecla de ativação e o
-  HUD da barra; `ui/noteHighway.ts` para o feedback visual (highway "brilhando").
-- **Depende de**: nada além do motor atual.
-- **Teste**: `scoring.test.ts` cobrindo acúmulo de barra e multiplicador dobrado.
+- **Como foi implementado**: `parser.ts` ganhou `STAR_POWER_MARKER_NOTE` (116) — ao
+  contrário dos marcadores de força/tap do 6.1, este não é por dificuldade: uma única
+  instância de nota 116 por track cobre gemas de qualquer dificuldade dentro do seu
+  span. `chartNotes.ts` (`extractChartNotes`) coleta os spans de SP, ordena por tick e
+  atribui a cada gema o índice do span em que ela cai como `starPowerPhraseId: number | null`
+  (novo campo em `ChartNote`/`JudgedNote`, ordem = ordem cronológica das fases no
+  chart) — confirmado contra o chart real da Joan Jett (6 fases). `core/gameplay/scoring.ts`
+  ganhou `DEFAULT_STAR_POWER_GAIN_PER_PHRASE` (20, ou seja 5 fases enchem a barra),
+  `DEFAULT_STAR_POWER_DRAIN_PER_SECOND` (100/8, barra cheia dura ~8s ativa),
+  `STAR_POWER_MULTIPLIER` (2x) e `clampStarPower`. `gameplayEngine.ts`: cada nota
+  resolvida (hit ou miss, via `applyHit`/`missNote`) chama `resolveStarPowerPhraseNote`,
+  que decrementa quantas notas da fase faltam e marca a fase como "falhada" em qualquer
+  miss; a barra só ganha o chunk da fase quando a última nota resolve sem nenhuma falha.
+  `activateStarPower()` liga o estado (`starPowerActive`) se houver barra disponível;
+  `update()` drena a barra proporcionalmente ao tempo real decorrido (delta entre
+  chamadas) e desativa sozinho ao esvaziar. Enquanto ativo, o multiplicador de combo
+  (`currentMultiplier()`) e os pontos de sustain (`sustainPoints()`) são dobrados.
+  `GameplayStats` ganhou `starPower: { available: number; active: boolean }`;
+  `GameplayEngineOptions` ganhou `starPowerGainPerPhrase`/`starPowerDrainPerSecond`.
+  `ui/keyboardInput.ts` ganhou a tecla dedicada (Space, `DEFAULT_STAR_POWER_KEY_CODE`)
+  e `FretInputHandlers.onActivateStarPower`; `ui/screens/gameplayScreen.ts` liga isso a
+  `gameplayEngine.activateStarPower()` e mostra a barra/estado no HUD;
+  `ui/noteHighway.ts` desenha um anel dourado nas notas de uma fase de SP e um brilho
+  dourado na highway inteira enquanto ativo.
+- **Depende de**: nada além do motor atual — extensão de
+  `chartNotes.ts`/`scoring.ts`/`gameplayEngine.ts`, mesmo padrão do 6.1.
+- **Teste**: `chartNotes.test.ts` (spans sintéticos: nota fora de fase, span cobrindo
+  fase, numeração em ordem cronológica, span compartilhado entre dificuldades; e o
+  chart real da Joan Jett com 6 fases). `scoring.test.ts` (`clampStarPower`).
+  `gameplayEngine.test.ts` (bloco "GameplayEngine — star power (Etapa 6.2)": barra não
+  paga fase incompleta, paga fase 100% acertada, nunca paga fase com miss, notas fora
+  de fase não contam, `activateStarPower` é no-op com barra vazia, ativa e dobra o
+  multiplicador, drena proporcionalmente ao tempo e desativa ao esvaziar, dobra pontos
+  de sustain).
 
 #### 6.3 — Rock meter (falha de música) — ✅ feito
 - **O que é**: barra de energia que sobe em acerto e desce em miss/wrong-press; some

@@ -19,8 +19,12 @@ import {
   DEFAULT_ROCK_METER_GAIN_PER_HIT,
   DEFAULT_ROCK_METER_LOSS_PER_MISS,
   DEFAULT_ROCK_METER_START,
+  DEFAULT_STAR_POWER_DRAIN_PER_SECOND,
+  DEFAULT_STAR_POWER_GAIN_PER_PHRASE,
   DEFAULT_SUSTAIN_POINTS_PER_SECOND,
+  STAR_POWER_MULTIPLIER,
   clampRockMeter,
+  clampStarPower,
   computeMultiplier,
   computeSustainPoints,
 } from "./scoring.ts";
@@ -52,6 +56,16 @@ export class GameplayEngine {
   private readonly rockMeterGainPerHit: number;
   private readonly rockMeterLossPerMiss: number;
   private readonly godMode: boolean;
+  private readonly starPowerGainPerPhrase: number;
+  private readonly starPowerDrainPerSecond: number;
+  /** Etapa 6.2: how many of each star power phrase's notes are still
+   * unresolved (hit or missed) — a phrase's bar contribution is only
+   * awarded once this hits 0 (every note in it resolved) with the phrase
+   * never having been marked failed. Keyed by `ChartNote.starPowerPhraseId`. */
+  private readonly starPowerPhraseRemaining = new Map<number, number>();
+  /** Phrase ids with at least one missed note — once failed, a phrase can
+   * never award its bar chunk, even if every other note in it was hit. */
+  private readonly starPowerPhraseFailed = new Set<number>();
 
   private score = 0;
   private combo = 0;
@@ -60,6 +74,12 @@ export class GameplayEngine {
   private notesMissed = 0;
   private wrongPresses = 0;
   private rockMeter: number;
+  private starPowerAvailable = 0;
+  private starPowerActive = false;
+  /** `update()`'s previous `songTimeMs`, so it can drain the star power
+   * meter proportionally to real elapsed time rather than per-frame (frame
+   * duration isn't constant). `null` before the first call. */
+  private lastUpdateSongTimeMs: number | null = null;
 
   constructor(chartNotes: readonly ChartNote[], options: GameplayEngineOptions = {}) {
     this.hitWindowsMs = options.hitWindowsMs ?? DEFAULT_HIT_WINDOWS_MS;
@@ -70,12 +90,20 @@ export class GameplayEngine {
     this.rockMeterLossPerMiss = options.rockMeterLossPerMiss ?? DEFAULT_ROCK_METER_LOSS_PER_MISS;
     this.rockMeter = clampRockMeter(options.rockMeterStartValue ?? DEFAULT_ROCK_METER_START);
     this.godMode = options.godMode ?? false;
+    this.starPowerGainPerPhrase = options.starPowerGainPerPhrase ?? DEFAULT_STAR_POWER_GAIN_PER_PHRASE;
+    this.starPowerDrainPerSecond = options.starPowerDrainPerSecond ?? DEFAULT_STAR_POWER_DRAIN_PER_SECOND;
 
     this.notes = chartNotes.map((note, id) => ({ ...note, id, state: NoteRuntimeState.Pending, judgment: null }));
     this.notesByFret = Array.from({ length: FRET_COUNT }, () => []);
     for (const note of this.notes) this.notesByFret[note.fret].push(note);
     this.nextPendingIndexByFret = new Array(FRET_COUNT).fill(0);
     this.holding = new Array(FRET_COUNT).fill(null);
+
+    for (const note of this.notes) {
+      if (note.starPowerPhraseId === null) continue;
+      const phraseId = note.starPowerPhraseId;
+      this.starPowerPhraseRemaining.set(phraseId, (this.starPowerPhraseRemaining.get(phraseId) ?? 0) + 1);
+    }
   }
 
   /** Every note in chart order, current `state`/`judgment` included — for
@@ -90,7 +118,7 @@ export class GameplayEngine {
       score: this.score,
       combo: this.combo,
       longestCombo: this.longestCombo,
-      multiplier: computeMultiplier(this.combo, this.comboMultiplierThresholds),
+      multiplier: this.currentMultiplier(),
       notesHit: this.notesHit,
       notesMissed: this.notesMissed,
       wrongPresses: this.wrongPresses,
@@ -98,7 +126,30 @@ export class GameplayEngine {
       accuracy: attempts === 0 ? 1 : this.notesHit / attempts,
       rockMeter: this.rockMeter,
       failed: !this.godMode && this.rockMeter <= 0,
+      starPower: { available: this.starPowerAvailable, active: this.starPowerActive },
     };
+  }
+
+  /**
+   * Etapa 6.2: activates star power if there's any meter to spend and it
+   * isn't already running — a no-op otherwise (no meter, or already
+   * active), so the caller (a dedicated key, see `ui/keyboardInput.ts`)
+   * doesn't need to check either condition itself. Once active, `update()`
+   * drains the meter over real time until it empties, deactivating on its
+   * own; there's no manual deactivation.
+   */
+  activateStarPower(): void {
+    if (this.starPowerActive || this.starPowerAvailable <= 0) return;
+    this.starPowerActive = true;
+  }
+
+  /** Combo multiplier, doubled while star power is active (stacks
+   * multiplicatively — e.g. combo x2 during star power scores as x4). Used
+   * for both the live `GameplayStats.multiplier` and the points a hit
+   * actually awards, so the HUD always shows what a hit right now is worth. */
+  private currentMultiplier(): number {
+    const comboMultiplier = computeMultiplier(this.combo, this.comboMultiplierThresholds);
+    return this.starPowerActive ? comboMultiplier * STAR_POWER_MULTIPLIER : comboMultiplier;
   }
 
   /**
@@ -121,6 +172,13 @@ export class GameplayEngine {
    */
   update(songTimeMs: number): readonly JudgedNote[] {
     const newlyMissed: JudgedNote[] = [];
+
+    if (this.starPowerActive) {
+      const dtMs = this.lastUpdateSongTimeMs === null ? 0 : Math.max(0, songTimeMs - this.lastUpdateSongTimeMs);
+      this.starPowerAvailable = clampStarPower(this.starPowerAvailable - (this.starPowerDrainPerSecond * dtMs) / 1000);
+      if (this.starPowerAvailable <= 0) this.starPowerActive = false;
+    }
+    this.lastUpdateSongTimeMs = songTimeMs;
 
     for (let fret = 0; fret < FRET_COUNT; fret++) {
       const queue = this.notesByFret[fret];
@@ -201,10 +259,11 @@ export class GameplayEngine {
     this.combo++;
     this.longestCombo = Math.max(this.longestCombo, this.combo);
     this.rockMeter = clampRockMeter(this.rockMeter + this.rockMeterGainPerHit);
-    const multiplier = computeMultiplier(this.combo, this.comboMultiplierThresholds);
+    const multiplier = this.currentMultiplier();
     const pointsAwarded = this.basePointsPerNote * multiplier;
     this.score += pointsAwarded;
     note.judgment = judgment;
+    this.resolveStarPowerPhraseNote(note, true);
 
     if (note.sustainMs > 0) {
       note.state = NoteRuntimeState.Holding;
@@ -241,14 +300,22 @@ export class GameplayEngine {
     }
 
     holding.note.state = NoteRuntimeState.SustainBroken;
-    this.score += computeSustainPoints(songTimeMs - holding.heldSinceMs, this.sustainPointsPerSecond);
+    this.score += this.sustainPoints(songTimeMs - holding.heldSinceMs);
     this.holding[fret] = null;
   }
 
   private completeSustain(fret: number, holding: HoldingNote, heldUntilMs: number): void {
     holding.note.state = NoteRuntimeState.SustainCompleted;
-    this.score += computeSustainPoints(heldUntilMs - holding.heldSinceMs, this.sustainPointsPerSecond);
+    this.score += this.sustainPoints(heldUntilMs - holding.heldSinceMs);
     this.holding[fret] = null;
+  }
+
+  /** Sustain points, doubled while star power is active — same "dobra o
+   * multiplicador de pontos" the plan calls for on note hits, applied here
+   * too since a held sustain is still points being earned in real time. */
+  private sustainPoints(heldMs: number): number {
+    const points = computeSustainPoints(heldMs, this.sustainPointsPerSecond);
+    return this.starPowerActive ? points * STAR_POWER_MULTIPLIER : points;
   }
 
   private missNote(note: JudgedNote): void {
@@ -257,5 +324,29 @@ export class GameplayEngine {
     this.notesMissed++;
     this.combo = 0;
     this.rockMeter = clampRockMeter(this.rockMeter - this.rockMeterLossPerMiss);
+    this.resolveStarPowerPhraseNote(note, false);
+  }
+
+  /**
+   * Etapa 6.2's phrase-completion bookkeeping, shared between a hit (real
+   * or HOPO/tap auto-hit) and a timed-out miss — every note in a phrase
+   * resolves one way or the other exactly once. A phrase awards its bar
+   * chunk only once its last note resolves *and* none of its notes were
+   * ever missed; a single miss permanently disqualifies that phrase (see
+   * `starPowerPhraseFailed`), even though bookkeeping still finishes
+   * counting down its remaining notes.
+   */
+  private resolveStarPowerPhraseNote(note: JudgedNote, hit: boolean): void {
+    const phraseId = note.starPowerPhraseId;
+    if (phraseId === null) return;
+
+    if (!hit) this.starPowerPhraseFailed.add(phraseId);
+
+    const remaining = (this.starPowerPhraseRemaining.get(phraseId) ?? 1) - 1;
+    this.starPowerPhraseRemaining.set(phraseId, remaining);
+
+    if (remaining <= 0 && !this.starPowerPhraseFailed.has(phraseId)) {
+      this.starPowerAvailable = clampStarPower(this.starPowerAvailable + this.starPowerGainPerPhrase);
+    }
   }
 }

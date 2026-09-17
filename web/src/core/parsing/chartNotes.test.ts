@@ -17,8 +17,8 @@ describe("extractChartNotes — synthetic chart", () => {
     const notes = extractChartNotes(midi, 0, Difficult.Expert);
 
     expect(notes).toEqual([
-      { timeMs: 1000, fret: 0, sustainMs: 250, isHopo: false, isTap: false },
-      { timeMs: 2000, fret: 4, sustainMs: 500, isHopo: false, isTap: false },
+      { timeMs: 1000, fret: 0, sustainMs: 250, isHopo: false, isTap: false, starPowerPhraseId: null },
+      { timeMs: 2000, fret: 4, sustainMs: 500, isHopo: false, isTap: false, starPowerPhraseId: null },
     ]);
   });
 
@@ -145,6 +145,59 @@ describe("extractChartNotes — HOPO/tap markers (Etapa 6.1)", () => {
   });
 });
 
+describe("extractChartNotes — star power markers (Etapa 6.2)", () => {
+  // MIDI note 116, not per-difficulty (see `STAR_POWER_MARKER_NOTE`'s doc
+  // comment in parser.ts) — a span covers every gem note of any difficulty
+  // whose onset falls within it, same span semantics as the force/tap
+  // markers but its own single marker note.
+
+  it("leaves notes outside every star power span with a null phrase id", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 96, time: 0, duration: 0 });
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert);
+
+    expect(notes[0].starPowerPhraseId).toBeNull();
+  });
+
+  it("assigns a phrase id to every gem note covered by a star power span", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 116, time: 0.9, duration: 0.2 }); // SP span: [0.9s, 1.1s]
+    track.addNote({ midi: 96, time: 1.0, duration: 0 }); // inside the span
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert);
+
+    expect(notes[0].starPowerPhraseId).toBe(0);
+  });
+
+  it("numbers phrases in chart order, regardless of the order their MIDI events were added", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 116, time: 5, duration: 0.1 }); // 2nd phrase chronologically, added first
+    track.addNote({ midi: 116, time: 0, duration: 0.1 }); // 1st phrase chronologically, added second
+    track.addNote({ midi: 96, time: 0.05, duration: 0 }); // inside the 1st phrase
+    track.addNote({ midi: 97, time: 5.05, duration: 0 }); // inside the 2nd phrase
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert);
+
+    expect(notes.find((n) => n.fret === 0)?.starPowerPhraseId).toBe(0);
+    expect(notes.find((n) => n.fret === 1)?.starPowerPhraseId).toBe(1);
+  });
+
+  it("applies the same star power span across every difficulty's gems, unlike force/tap markers", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 116, time: 0, duration: 1 }); // SP span: [0s, 1s]
+    track.addNote({ midi: 84, time: 0.5, duration: 0 }); // Hard fret 0, inside the span
+
+    const notes = extractChartNotes(midi, 0, Difficult.Hard);
+
+    expect(notes[0].starPowerPhraseId).toBe(0);
+  });
+});
+
 describe("extractChartNotes — real chart", () => {
   it("extracts the expert guitar chart for the bundled Joan Jett song", () => {
     const midi = new Midi(
@@ -164,6 +217,7 @@ describe("extractChartNotes — real chart", () => {
       sustainMs: expect.closeTo(79.25),
       isHopo: false,
       isTap: true,
+      starPowerPhraseId: null,
     });
     // Fully ordered by time.
     for (let i = 1; i < notes.length; i++) {
@@ -171,5 +225,11 @@ describe("extractChartNotes — real chart", () => {
     }
     // Every fret is a valid gem index.
     expect(notes.every((n) => n.fret >= 0 && n.fret <= 4)).toBe(true);
+    // Etapa 6.2: this chart has real star power phrases (checked against
+    // the actual notes.mid), numbered contiguously from 0.
+    const phraseIds = [...new Set(notes.map((n) => n.starPowerPhraseId).filter((id) => id !== null))].sort(
+      (a, b) => a - b,
+    );
+    expect(phraseIds).toEqual([0, 1, 2, 3, 4, 5]);
   });
 });

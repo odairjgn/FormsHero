@@ -76,6 +76,18 @@ export function getTapMarkerNote(difficult: Difficult): number {
   return GEMS_BY_DIFFICULTY[difficult][0] + TAP_MARKER_OFFSET;
 }
 
+/**
+ * Etapa 6.2's star power/overdrive marker: the FoF/Clone Hero `.mid`
+ * convention is a single MIDI note (116), one per instrument track,
+ * spanning the phrase's duration the same way the HOPO/tap force markers
+ * span theirs (see `FORCE_MARKER_OFFSET`'s doc comment) — every gem note of
+ * any difficulty whose onset falls within a note-116 span belongs to that
+ * star power phrase. Unlike the HOPO/tap markers, this one is *not*
+ * per-difficulty (there's only ever one instance of note 116, shared across
+ * every difficulty's gems).
+ */
+export const STAR_POWER_MARKER_NOTE = 116;
+
 export interface GemLookup {
   index: number;
   difficult: Difficult;
