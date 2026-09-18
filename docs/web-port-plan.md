@@ -324,25 +324,95 @@ referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/
   piso de janela mínima pra sílaba curta, combo/score/rock meter/god
   mode/accuracy — mesmo padrão de `gameplayEngine.test.ts`).
 
-#### 6.6 — Multiplayer local (2 instrumentos)
+#### 6.6 — Multiplayer local (2 instrumentos) — ✅ feito (com teclas configuráveis)
 - **O que é**: dois jogadores simultâneos (ex. guitarra + baixo) na mesma tela,
-  cada um com seu próprio highway, mapeamento de teclado e score/combo.
-- **Onde mexe**: `core/gameplay/gameplayEngine.ts` já é uma classe/factory por
-  instância — instanciar duas (uma por jogador) contra o mesmo `songTime` do
-  `AudioEngine` (Etapa 2, já é um clock único compartilhável) deve funcionar sem
-  mudar o engine em si. `ui/keyboardInput.ts` precisa de dois mapeamentos de tecla
-  simultâneos sem conflito (o default D/F/J/K/L de um jogador precisa de um segundo
-  set, ex. teclado numérico ou uma segunda metade do teclado — ver `core/settings/gameSettings.ts`
-  para onde já existe configuração de teclas, estender para "por jogador").
-  `ui/noteHighway.ts` e `ui/screens/gameplayScreen.ts` precisam renderizar duas
-  highways lado a lado no mesmo `<canvas>` (ou dois `<canvas>`); `preGameScreen.ts`
-  precisa de um segundo seletor de instrumento/dificuldade para o jogador 2;
-  `resultsScreen.ts` precisa mostrar os dois resultados.
-- **Depende de**: nada além do motor atual, mas é o item de maior mudança em UI/telas
-  (toca em quase todo `ui/screens`).
-- **Teste**: `gameplayEngine.test.ts` já cobre uma instância; útil um teste de duas
-  instâncias rodando contra o mesmo clock sem interferência de estado (garantir que
-  não há estado global compartilhado indevido entre elas).
+  cada um com seu próprio highway, mapeamento de teclado e score/combo — mais,
+  como pré-requisito direto (dois jogadores só cabem num teclado com bindings
+  configuráveis), rebind de teclas para qualquer jogador em qualquer modo.
+- **Como foi implementado**:
+  - **Teclas configuráveis** (`core/settings/types.ts`/`gameSettings.ts`):
+    `PlayerKeyBindings` (`fretKeyCodes: string[5]` + `starPowerKeyCode`) e
+    `KeyBindingsSettings` (`player1`/`player2`) viraram parte de `GameSettings`,
+    persistidos como o resto (`loadGameSettings`/`saveGameSettings`,
+    sanitização por-jogador com fallback pro default em bindings malformados).
+    As constantes de default que antes viviam só em `ui/keyboardInput.ts`
+    (`DEFAULT_FRET_KEY_CODES`/`DEFAULT_STAR_POWER_KEY_CODE`, ambas mantidas
+    como default de parâmetro de `attachKeyboardFretInput` para quem não passa
+    por settings) foram duplicadas em `gameSettings.ts` como ponto de partida
+    do jogador 1 (D F J K L + Shift esquerdo); jogador 2 ganhou um default
+    próprio que não colide com o do jogador 1 num teclado compartilhado
+    (1 2 3 4 5 + `` ` `` /crase). `DEFAULT_DRUM_KEY_CODES` (o pedal fixo em
+    Espaço) foi removido: com bindings configuráveis, o pedal é simplesmente
+    o slot de fret índice 4 de quem quer que esteja jogando bateria — mesma
+    convenção de índice que `DRUM_PEDAL_FRET_INDEX` já usa no nível do chart
+    (reaproveita os ranges de nota da guitarra), então não precisa de um
+    default separado por instrumento. `findDuplicateKeyCodes`/
+    `allKeyBindingCodes` (novas, testadas em `gameSettings.test.ts`) varrem os
+    12 slots dos dois jogadores e apontam qualquer tecla repetida — usadas
+    pela tela de configurações para recusar salvar um esquema com colisão.
+    `ui/keyboardInput.ts` ganhou `formatKeyCode(code)`, um humanizador de
+    `KeyboardEvent.code` (tabela pra teclas especiais + geração pra
+    Key*/Digit*/Numpad*) usado em toda UI que mostra uma tecla, substituindo
+    o antigo `STAR_POWER_KEY_LABEL` hardcoded.
+  - **Tela de configurações** (`ui/screens/settingsScreen.ts`): nova seção
+    "Teclas" com 6 linhas por jogador (4 trastes + traste laranja/pedal + star
+    power), cada uma com um botão "Alterar" que entra em modo de captura
+    (`captureNextKey`, um listener de `keydown` de disparo único no `window`;
+    Esc cancela sem alterar) e mostra a tecla atual via `formatKeyCode`. Salvar
+    roda `findDuplicateKeyCodes` primeiro e recusa com uma mensagem se houver
+    colisão, em vez de persistir um esquema quebrado; "Restaurar teclas
+    padrão" reseta só a seção de teclas (o "Restaurar padrões" geral já
+    reseta tudo, teclas incluídas, já que `keyBindings` é só mais um campo de
+    `GameSettings`).
+  - **Motor de gameplay**: nenhuma mudança em `gameplayEngine.ts` — ele já era
+    uma classe por instância sem estado global (confirmado antes de escrever
+    qualquer coisa nova), então duas instâncias contra o mesmo
+    `audioEngine.currentTime` funcionam de graça, exatamente como o plano
+    previa.
+  - **Tela de multiplayer** (`ui/screens/multiplayerGameplayScreen.ts`, novo
+    arquivo — irmão de `gameplayScreen.ts`, não uma generalização dele, pra
+    não forçar o caso solo comum a passar por um array de 1): duas
+    `GameplayEngine` + duas `NoteHighway` (um `<canvas>` por jogador, lado a
+    lado via CSS, `.mp-columns`/`.mp-column` em `style.css`) + dois
+    `attachKeyboardFretInput` independentes (cada um só reage aos códigos do
+    seu próprio jogador, então nenhuma mudança foi necessária em
+    `keyboardInput.ts` pra suportar dois conjuntos simultâneos — só chamar a
+    função duas vezes com bindings diferentes). Fim de música é o mesmo
+    critério de `gameplayScreen.ts` (áudio + último note de cada chart)
+    estendido pros dois charts; falha (Etapa 6.3) de *qualquer* jogador
+    encerra a música pra ambos (não existe um "rock meter de banda"
+    compartilhado — cada motor mantém o seu). `gameplayScreen.ts` (solo) só
+    ganhou `fretKeyCodes`/`starPowerKeyCode` opcionais (default pros
+    constantes de `keyboardInput.ts`) no lugar do antigo
+    `isDrums ? DEFAULT_DRUM_KEY_CODES : DEFAULT_FRET_KEY_CODES`.
+  - **Fluxo de telas**: `preGameScreen.ts` ganhou um segundo seletor
+    (instrumento/dificuldade do jogador 2) atrás de um checkbox "Multiplayer
+    local", escondido quando a música não tem nenhuma parte jogável além de
+    vocal (vocal não entra no seletor do jogador 2 nem pode ser a escolha do
+    jogador 1 com multiplayer ligado — motor/tela totalmente diferentes,
+    julgados por pitch de microfone, não cabem no mesmo tick loop; um
+    listener no seletor do jogador 1 desliga o checkbox automaticamente se
+    ele virar vocal, com uma checagem defensiva igual no clique de "Iniciar
+    jogo"). A dica de teclas de cada seletor agora lê as bindings de verdade
+    do jogador (via `formatKeyCode`) em vez de mostrar "D F J K L" fixo.
+    `resultsScreen.ts` foi generalizado de um único
+    `(part, difficult, stats, record)` pra uma lista de `ResultEntry[]` (um
+    por jogador) — o rótulo "Jogador N" só aparece quando há mais de uma
+    entrada, então o visual solo não mudou. `app.ts` ganhou
+    `showMultiplayerGameplay`/`PlayerResult`/`PlayerSelection` e passa
+    `settings.keyBindings` pra `preGameScreen`/`showGameplay`.
+- **Depende de**: nada além do motor atual.
+- **Teste**: `gameplayEngine.test.ts` já cobria uma instância isolada (sem
+  estado de módulo compartilhado, confirmado por leitura de código antes da
+  Etapa 6.6 — não precisou de teste novo pra "duas instâncias não
+  interferem", já que não há nada pra interferir). `gameSettings.test.ts`
+  ganhou cobertura pro round-trip de `keyBindings`, fallback por-jogador em
+  binding malformado, e `findDuplicateKeyCodes` (dentro do mesmo jogador e
+  entre os dois). `multiplayerGameplayScreen.ts`/`preGameScreen.ts`/
+  `settingsScreen.ts` seguem sem teste automatizado — mesma observação já
+  registrada para `noteHighway.ts`/`gameplayScreen.ts`/`settingsScreen.ts`
+  (DOM/Canvas real) — verificado manualmente: `npm run build`/`npx tsc
+  --noEmit` limpos e os 220 testes existentes (incluindo os novos) passando.
 
 #### 6.7 — Leaderboard online
 - **Fora de cogitação enquanto a decisão "sem backend, site 100% estático" (ver topo

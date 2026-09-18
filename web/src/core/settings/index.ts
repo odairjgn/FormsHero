@@ -5,9 +5,19 @@ export { computeCalibrationOffsetMs } from "./calibration.ts";
 export { highScoreKey, loadHighScore, recordHighScoreAttempt, type RecordAttemptResult } from "./highScores.ts";
 export {
   DEFAULT_GAME_SETTINGS,
+  DEFAULT_KEY_BINDINGS,
   DEFAULT_SCROLL_PX_PER_MS,
   SETTINGS_LIMITS,
+  allKeyBindingCodes,
+  findDuplicateKeyCodes,
   loadGameSettings,
   saveGameSettings,
 } from "./gameSettings.ts";
-export type { GameSettings, HighScoreEntry, HighScoreKeyParts, StorageLike } from "./types.ts";
+export type {
+  GameSettings,
+  HighScoreEntry,
+  HighScoreKeyParts,
+  KeyBindingsSettings,
+  PlayerKeyBindings,
+  StorageLike,
+} from "./types.ts";

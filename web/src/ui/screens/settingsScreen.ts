@@ -5,18 +5,61 @@
 // No C# equivalent — the original project never judged timing at all (see
 // `core/gameplay`'s header comments).
 //
-// The tap test and its `AudioContext` beeps are DOM/Web-Audio glue, so —
-// same reasoning as `noteHighway.ts`'s and `createAudioEngine.ts`'s header
-// comments — this file isn't unit-tested; only the pure offset math it
-// calls (`computeCalibrationOffsetMs`) is.
+// Etapa 6.6 added the key-bindings section below: rebinding both players'
+// frets/star-power keys, previously fixed module-level constants in
+// `ui/keyboardInput.ts` (see `core/settings/types.ts`'s `PlayerKeyBindings`
+// doc comment for why this became a persisted setting at all).
+//
+// The tap test and its `AudioContext` beeps (and the key-capture listener
+// below) are DOM/Web-Audio glue, so — same reasoning as `noteHighway.ts`'s
+// and `createAudioEngine.ts`'s header comments — this file isn't
+// unit-tested; only the pure logic it calls (`computeCalibrationOffsetMs`,
+// `findDuplicateKeyCodes`) is.
 
 import { computeCalibrationOffsetMs } from "../../core/settings/calibration.ts";
-import { DEFAULT_GAME_SETTINGS, SETTINGS_LIMITS } from "../../core/settings/gameSettings.ts";
-import type { GameSettings } from "../../core/settings/types.ts";
+import { DEFAULT_GAME_SETTINGS, SETTINGS_LIMITS, findDuplicateKeyCodes } from "../../core/settings/gameSettings.ts";
+import type { GameSettings, KeyBindingsSettings } from "../../core/settings/types.ts";
+import { formatKeyCode } from "../keyboardInput.ts";
 
 export interface SettingsCallbacks {
   onBack(): void;
   onSave(settings: GameSettings): void;
+}
+
+/** One rebindable slot, for `KEY_BINDING_ROWS` below. `fretIndex` picks
+ * which of `PlayerKeyBindings.fretKeyCodes` this row edits; `"starPower"`
+ * edits `starPowerKeyCode` instead. */
+type KeyBindingSlot = { readonly fretIndex: number } | { readonly fretIndex: "starPower" };
+
+/** The 6 rows shown per player, in fret order (green->orange) then star
+ * power — same order `FRET_COLORS`/`GameNeck` use elsewhere, so this list
+ * reads the same way the note highway does. */
+const KEY_BINDING_ROWS: ReadonlyArray<{ readonly slot: KeyBindingSlot; readonly label: string }> = [
+  { slot: { fretIndex: 0 }, label: "Verde" },
+  { slot: { fretIndex: 1 }, label: "Vermelho" },
+  { slot: { fretIndex: 2 }, label: "Amarelo" },
+  { slot: { fretIndex: 3 }, label: "Azul" },
+  { slot: { fretIndex: 4 }, label: "Laranja / Pedal" },
+  { slot: { fretIndex: "starPower" }, label: "Star Power" },
+];
+
+function readSlot(bindings: KeyBindingsSettings, player: "player1" | "player2", slot: KeyBindingSlot): string {
+  const playerBindings = bindings[player];
+  return slot.fretIndex === "starPower" ? playerBindings.starPowerKeyCode : playerBindings.fretKeyCodes[slot.fretIndex];
+}
+
+function writeSlot(
+  bindings: KeyBindingsSettings,
+  player: "player1" | "player2",
+  slot: KeyBindingSlot,
+  code: string,
+): KeyBindingsSettings {
+  const playerBindings = bindings[player];
+  const updated =
+    slot.fretIndex === "starPower"
+      ? { ...playerBindings, starPowerKeyCode: code }
+      : { ...playerBindings, fretKeyCodes: playerBindings.fretKeyCodes.map((c, i) => (i === slot.fretIndex ? code : c)) };
+  return { ...bindings, [player]: updated };
 }
 
 /** Metronome tempo for the calibration tap test — 100 BPM, a comfortable
@@ -36,9 +79,14 @@ export function renderSettingsScreen(
 ): void {
   let settings = initialSettings;
   let stopCalibration: (() => void) | null = null;
+  // Etapa 6.6: which slot (if any) is waiting for its next keydown to
+  // rebind it, and any validation message from the last save attempt.
+  let capturing: { player: "player1" | "player2"; slot: KeyBindingSlot } | null = null;
+  let stopCapture: (() => void) | null = null;
+  let keyBindingsError: string | null = null;
 
   function render(): void {
-    const { calibrationOffsetMs, hitWindowsMs, scrollPxPerMs } = settings;
+    const { calibrationOffsetMs, hitWindowsMs, scrollPxPerMs, keyBindings } = settings;
     const limits = SETTINGS_LIMITS;
 
     container.innerHTML = `
@@ -68,6 +116,15 @@ export function renderSettingsScreen(
           <label><input id="scroll-speed" type="number" step="0.05" min="${limits.scrollPxPerMs.min}" max="${limits.scrollPxPerMs.max}" value="${scrollPxPerMs}" /></label>
         </section>
 
+        <section class="key-bindings">
+          <h2>Teclas</h2>
+          <p>Jogador 2 só é usado num jogo multiplayer local (2 jogadores na mesma música).</p>
+          ${renderPlayerBindings("player1", "Jogador 1", keyBindings)}
+          ${renderPlayerBindings("player2", "Jogador 2", keyBindings)}
+          ${keyBindingsError ? `<p class="status">${keyBindingsError}</p>` : ""}
+          <button id="reset-keys-btn" type="button">Restaurar teclas padrão</button>
+        </section>
+
         <button id="save-btn" type="button">Salvar</button>
         <button id="reset-btn" type="button">Restaurar padrões</button>
       </div>
@@ -75,6 +132,7 @@ export function renderSettingsScreen(
 
     container.querySelector<HTMLButtonElement>("#back-btn")!.addEventListener("click", () => {
       stopCalibration?.();
+      stopCapture?.();
       callbacks.onBack();
     });
 
@@ -88,8 +146,35 @@ export function renderSettingsScreen(
 
     container.querySelector<HTMLButtonElement>("#reset-btn")!.addEventListener("click", () => {
       settings = DEFAULT_GAME_SETTINGS;
+      keyBindingsError = null;
       render();
     });
+
+    container.querySelector<HTMLButtonElement>("#reset-keys-btn")!.addEventListener("click", () => {
+      settings = { ...settings, keyBindings: DEFAULT_GAME_SETTINGS.keyBindings };
+      keyBindingsError = null;
+      render();
+    });
+
+    for (const player of ["player1", "player2"] as const) {
+      for (const { slot } of KEY_BINDING_ROWS) {
+        const rowId = slotElementId(player, slot);
+        container.querySelector<HTMLButtonElement>(`#${rowId}-btn`)!.addEventListener("click", () => {
+          stopCapture?.();
+          capturing = { player, slot };
+          keyBindingsError = null;
+          render();
+          stopCapture = captureNextKey((code) => {
+            settings = { ...settings, keyBindings: writeSlot(settings.keyBindings, player, slot, code) };
+            capturing = null;
+            render();
+          }, () => {
+            capturing = null;
+            render();
+          });
+        });
+      }
+    }
 
     container.querySelector<HTMLButtonElement>("#save-btn")!.addEventListener("click", () => {
       const perfect = readNumber("#window-perfect", hitWindowsMs.perfect);
@@ -99,10 +184,18 @@ export function renderSettingsScreen(
       // if the player typed them in a different order.
       const [orderedPerfect, orderedGood, orderedOk] = [perfect, good, ok].sort((a, b) => a - b);
 
+      const duplicates = findDuplicateKeyCodes(settings.keyBindings);
+      if (duplicates.length > 0) {
+        keyBindingsError = `Tecla repetida: ${duplicates.map(formatKeyCode).join(", ")}. Cada tecla só pode ser usada uma vez.`;
+        render();
+        return;
+      }
+
       settings = {
         calibrationOffsetMs: settings.calibrationOffsetMs,
         hitWindowsMs: { perfect: orderedPerfect, good: orderedGood, ok: orderedOk },
         scrollPxPerMs: readNumber("#scroll-speed", scrollPxPerMs),
+        keyBindings: settings.keyBindings,
       };
       callbacks.onSave(settings);
     });
@@ -114,7 +207,48 @@ export function renderSettingsScreen(
     }
   }
 
+  function renderPlayerBindings(player: "player1" | "player2", title: string, keyBindings: KeyBindingsSettings): string {
+    const rows = KEY_BINDING_ROWS.map(({ slot, label }) => {
+      const rowId = slotElementId(player, slot);
+      const isCapturing = capturing?.player === player && capturing.slot.fretIndex === slot.fretIndex;
+      const currentLabel = isCapturing ? "Pressione uma tecla... (Esc cancela)" : formatKeyCode(readSlot(keyBindings, player, slot));
+      return `
+        <div class="key-binding-row">
+          <span class="key-binding-label">${label}</span>
+          <span class="key-binding-value">${currentLabel}</span>
+          <button id="${rowId}-btn" type="button">${isCapturing ? "..." : "Alterar"}</button>
+        </div>
+      `;
+    }).join("");
+
+    return `<div class="key-binding-group"><h3>${title}</h3>${rows}</div>`;
+  }
+
   render();
+}
+
+function slotElementId(player: "player1" | "player2", slot: KeyBindingSlot): string {
+  return `keybind-${player}-${slot.fretIndex}`;
+}
+
+/**
+ * Waits for the next keydown anywhere on the page and reports its `code` to
+ * `onCaptured`, or calls `onCancel` (no code reported) if that key is
+ * Escape — the standard "press Escape to back out of a rebind" convention.
+ * OS key-repeat is ignored, same reasoning as `attachKeyboardFretInput`.
+ * Returns a function that aborts the capture early (e.g. the player
+ * navigates away mid-capture) without calling either callback.
+ */
+function captureNextKey(onCaptured: (code: string) => void, onCancel: () => void): () => void {
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.repeat) return;
+    event.preventDefault();
+    window.removeEventListener("keydown", onKeyDown);
+    if (event.code === "Escape") onCancel();
+    else onCaptured(event.code);
+  };
+  window.addEventListener("keydown", onKeyDown);
+  return () => window.removeEventListener("keydown", onKeyDown);
 }
 
 /**

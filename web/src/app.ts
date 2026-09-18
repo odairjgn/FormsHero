@@ -26,8 +26,10 @@ import {
   renderSettingsScreen,
   renderSongSelectScreen,
   startGameplayScreen,
+  startMultiplayerGameplayScreen,
   startVocalGameplayScreen,
 } from "./ui/index.ts";
+import type { PlayerGameplayConfig, PlayerSelection, ResultEntry } from "./ui/index.ts";
 import { escapeHtml } from "./ui/screens/formatting.ts";
 
 // MVP scope was guitar/bass only; Etapa 6.4 adds drums, Etapa 6.5 adds
@@ -141,15 +143,32 @@ export function startApp(container: HTMLElement): void {
 
   function showPreGame(loaded: LoadedSong): void {
     leaveGameplay();
-    renderPreGameScreen(container, loaded.song, loaded.parts, {
+    renderPreGameScreen(container, loaded.song, loaded.parts, settings.keyBindings, {
       onBack: showSongSelect,
-      onStart: (part, difficult, godMode) => showGameplay(loaded, part, difficult, godMode),
+      onStart: (player1, player2, godMode) => showGameplay(loaded, player1, player2, godMode),
       getHighScore: (part, difficult) => loadHighScore(window.localStorage, songHighScoreKey(loaded, part, difficult)),
     });
   }
 
-  function showGameplay(loaded: LoadedSong, part: Part, difficult: Difficult, godMode: boolean): void {
+  function showGameplay(
+    loaded: LoadedSong,
+    player1: PlayerSelection,
+    player2: PlayerSelection | null,
+    godMode: boolean,
+  ): void {
     lastGodMode = godMode;
+
+    // Etapa 6.6: a second player picked on the pre-game screen means a
+    // 2-player playthrough — `renderPreGameScreen` already excludes vocals
+    // from that second picker (see its header comment), so this branch
+    // never has to reconcile a vocal `player2` with the fret-keypress
+    // engine below.
+    if (player2) {
+      showMultiplayerGameplay(loaded, player1, player2, godMode);
+      return;
+    }
+
+    const { part, difficult } = player1;
 
     // Etapa 6.5: vocals is judged by continuous pitch match, not a fret
     // keypress stream, so it runs an entirely different engine/screen — see
@@ -157,7 +176,7 @@ export function startApp(container: HTMLElement): void {
     // header comments for why this can't share `extractChartNotes`/
     // `GameplayEngine`/`startGameplayScreen`.
     if (part.instrument === GameInstrument.Vocals) {
-      showVocalGameplay(loaded, part, difficult, godMode);
+      showVocalGameplay(loaded, player1, godMode);
       return;
     }
 
@@ -171,13 +190,15 @@ export function startApp(container: HTMLElement): void {
       inputOffsetMs: settings.calibrationOffsetMs,
       godMode,
       isDrums: part.instrument === GameInstrument.Drums,
+      fretKeyCodes: settings.keyBindings.player1.fretKeyCodes,
+      starPowerKeyCode: settings.keyBindings.player1.starPowerKeyCode,
       onFinished: (stats) => {
         stopActiveGameplay = null;
-        showResults(loaded, part, difficult, stats, false);
+        showResults(loaded, [{ selection: player1, stats }], false, () => showGameplay(loaded, player1, null, lastGodMode));
       },
       onFailed: (stats) => {
         stopActiveGameplay = null;
-        showResults(loaded, part, difficult, stats, true);
+        showResults(loaded, [{ selection: player1, stats }], true, () => showGameplay(loaded, player1, null, lastGodMode));
       },
       onQuit: () => {
         stopActiveGameplay = null;
@@ -186,7 +207,74 @@ export function startApp(container: HTMLElement): void {
     });
   }
 
-  function showVocalGameplay(loaded: LoadedSong, part: Part, difficult: Difficult, godMode: boolean): void {
+  /**
+   * Etapa 6.6: two independent `GameplayEngine`s (one per player) driven off
+   * the same `AudioEngine` clock — see `multiplayerGameplayScreen.ts`'s
+   * header comment for why this is a sibling of `startGameplayScreen`
+   * rather than a generalization of it.
+   */
+  function showMultiplayerGameplay(
+    loaded: LoadedSong,
+    player1: PlayerSelection,
+    player2: PlayerSelection,
+    godMode: boolean,
+  ): void {
+    function toPlayerConfig(selection: PlayerSelection, label: string, bindings: typeof settings.keyBindings.player1): PlayerGameplayConfig {
+      return {
+        label,
+        notes: extractChartNotes(loaded.midi, selection.part.index, selection.difficult, selection.part.instrument),
+        instrumentLayer: AUDIO_LAYER_BY_INSTRUMENT[selection.part.instrument] ?? null,
+        isDrums: selection.part.instrument === GameInstrument.Drums,
+        fretKeyCodes: bindings.fretKeyCodes,
+        starPowerKeyCode: bindings.starPowerKeyCode,
+      };
+    }
+
+    const replay = () => showMultiplayerGameplay(loaded, player1, player2, lastGodMode);
+
+    stopActiveGameplay = startMultiplayerGameplayScreen(container, {
+      audioEngine: loaded.audioEngine,
+      players: [
+        toPlayerConfig(player1, "Jogador 1", settings.keyBindings.player1),
+        toPlayerConfig(player2, "Jogador 2", settings.keyBindings.player2),
+      ],
+      hitWindowsMs: settings.hitWindowsMs,
+      scrollPxPerMs: settings.scrollPxPerMs,
+      inputOffsetMs: settings.calibrationOffsetMs,
+      godMode,
+      onFinished: (stats) => {
+        stopActiveGameplay = null;
+        showResults(
+          loaded,
+          [
+            { selection: player1, stats: stats[0], label: "Jogador 1" },
+            { selection: player2, stats: stats[1], label: "Jogador 2" },
+          ],
+          false,
+          replay,
+        );
+      },
+      onFailed: (stats) => {
+        stopActiveGameplay = null;
+        showResults(
+          loaded,
+          [
+            { selection: player1, stats: stats[0], label: "Jogador 1" },
+            { selection: player2, stats: stats[1], label: "Jogador 2" },
+          ],
+          true,
+          replay,
+        );
+      },
+      onQuit: () => {
+        stopActiveGameplay = null;
+        showPreGame(loaded);
+      },
+    });
+  }
+
+  function showVocalGameplay(loaded: LoadedSong, player: PlayerSelection, godMode: boolean): void {
+    const { part } = player;
     const notes = extractVocalNotes(loaded.midi, part.index, loaded.midiBytes);
     stopActiveGameplay = startVocalGameplayScreen(container, {
       audioContext: ensureAudioContext(),
@@ -195,11 +283,11 @@ export function startApp(container: HTMLElement): void {
       godMode,
       onFinished: (stats) => {
         stopActiveGameplay = null;
-        showResults(loaded, part, difficult, stats, false);
+        showResults(loaded, [{ selection: player, stats }], false, () => showGameplay(loaded, player, null, lastGodMode));
       },
       onFailed: (stats) => {
         stopActiveGameplay = null;
-        showResults(loaded, part, difficult, stats, true);
+        showResults(loaded, [{ selection: player, stats }], true, () => showGameplay(loaded, player, null, lastGodMode));
       },
       onQuit: () => {
         stopActiveGameplay = null;
@@ -208,22 +296,28 @@ export function startApp(container: HTMLElement): void {
     });
   }
 
-  function showResults(
-    loaded: LoadedSong,
-    part: Part,
-    difficult: Difficult,
-    stats: GameplayStats,
-    failed: boolean,
-  ): void {
-    const record = recordHighScoreAttempt(window.localStorage, songHighScoreKey(loaded, part, difficult), {
-      score: stats.score,
-      accuracy: stats.accuracy,
-      longestCombo: stats.longestCombo,
-      achievedAt: new Date().toISOString(),
+  interface PlayerResult {
+    readonly selection: PlayerSelection;
+    readonly stats: GameplayStats;
+    /** Only set for a multiplayer result — `renderResultsScreen` shows a
+     * label per entry only when there's more than one, so a solo result
+     * looks exactly as it did before Etapa 6.6. */
+    readonly label?: string;
+  }
+
+  function showResults(loaded: LoadedSong, results: readonly PlayerResult[], failed: boolean, onPlayAgain: () => void): void {
+    const entries: ResultEntry[] = results.map(({ selection, stats, label }) => {
+      const record = recordHighScoreAttempt(window.localStorage, songHighScoreKey(loaded, selection.part, selection.difficult), {
+        score: stats.score,
+        accuracy: stats.accuracy,
+        longestCombo: stats.longestCombo,
+        achievedAt: new Date().toISOString(),
+      });
+      return { part: selection.part, difficult: selection.difficult, stats, record, label };
     });
 
-    renderResultsScreen(container, loaded.song, part, difficult, stats, record, failed, {
-      onPlayAgain: () => showGameplay(loaded, part, difficult, lastGodMode),
+    renderResultsScreen(container, loaded.song, entries, failed, {
+      onPlayAgain,
       onBackToSongSelect: showSongSelect,
     });
   }

@@ -9,12 +9,12 @@ import type { GameplayStats, HitWindowsMs } from "../../core/gameplay/index.ts";
 import type { AudioEngine, AudioLayer } from "../../core/audio/index.ts";
 import type { ChartNote } from "../../core/parsing/index.ts";
 import {
-  DEFAULT_DRUM_KEY_CODES,
   DEFAULT_FRET_KEY_CODES,
+  DEFAULT_STAR_POWER_KEY_CODE,
   HIT_EFFECT_DURATION_MS,
   NoteHighway,
-  STAR_POWER_KEY_LABEL,
   attachKeyboardFretInput,
+  formatKeyCode,
 } from "../index.ts";
 import type { HitEffect } from "../index.ts";
 
@@ -35,11 +35,19 @@ export interface GameplayScreenOptions {
   /** God mode: forwarded straight to `GameplayEngineOptions.godMode` — the
    * rock meter keeps moving for the HUD, but `onFailed` never fires. */
   readonly godMode?: boolean;
-  /** Etapa 6.4: true for a `GameInstrument.Drums` playthrough — switches the
-   * keyboard bindings to `DEFAULT_DRUM_KEY_CODES` (pedal on Space) and tells
-   * the highway to draw the pedal fret as a full-width bar instead of a
-   * per-lane gem. */
+  /** Etapa 6.4: true for a `GameInstrument.Drums` playthrough — tells the
+   * highway to draw the pedal fret (`DRUM_PEDAL_FRET_INDEX`) as a full-width
+   * bar instead of a per-lane gem. Which physical key triggers it is just
+   * whatever `fretKeyCodes[DRUM_PEDAL_FRET_INDEX]` is (see
+   * `core/settings/types.ts`'s `PlayerKeyBindings` doc comment for why one
+   * binding set covers guitar/bass and drums alike). */
   readonly isDrums?: boolean;
+  /** Etapa 6.6: this playthrough's key bindings — defaults to
+   * `DEFAULT_FRET_KEY_CODES`/`DEFAULT_STAR_POWER_KEY_CODE` for a caller that
+   * hasn't wired up `core/settings` (e.g. a test harness); `app.ts` passes
+   * the player's configured `PlayerKeyBindings` instead. */
+  readonly fretKeyCodes?: readonly string[];
+  readonly starPowerKeyCode?: string;
   onFinished(stats: GameplayStats): void;
   /** Etapa 6.3: called instead of `onFinished` once the rock meter bottoms
    * out (`stats.failed`) — the song stops early rather than playing to the
@@ -58,6 +66,8 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
   const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, godMode, isDrums, onFinished, onFailed, onQuit } =
     options;
   const inputOffsetMs = options.inputOffsetMs ?? 0;
+  const fretKeyCodes = options.fretKeyCodes ?? DEFAULT_FRET_KEY_CODES;
+  const starPowerKeyCode = options.starPowerKeyCode ?? DEFAULT_STAR_POWER_KEY_CODE;
 
   container.innerHTML = `
     <div class="screen gameplay">
@@ -111,7 +121,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     onActivateStarPower: () => {
       gameplayEngine.activateStarPower();
     },
-  }, isDrums ? DEFAULT_DRUM_KEY_CODES : DEFAULT_FRET_KEY_CODES);
+  }, fretKeyCodes, starPowerKeyCode);
 
   function renderHud(stats: GameplayStats): void {
     const accuracyPct = (stats.accuracy * 100).toFixed(1);
@@ -122,7 +132,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
       `Score: ${stats.score} | Combo: ${stats.combo} (recorde ${stats.longestCombo}) | ` +
       `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal}) | ` +
       `Erros: ${stats.notesMissed + stats.wrongPresses} | Energia: ${stats.rockMeter}% | ` +
-      `Star Power: ${starPowerText} (${STAR_POWER_KEY_LABEL} p/ ativar)` +
+      `Star Power: ${starPowerText} (${formatKeyCode(starPowerKeyCode)} p/ ativar)` +
       (godMode ? " | GOD MODE" : "");
   }
 

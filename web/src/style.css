@@ -61,11 +61,26 @@ input[type="file"] {
 .hud {
   font-family: monospace;
   margin-bottom: 0.5rem;
+  white-space: pre-line;
 }
 
 .gameplay canvas {
   background: #101018;
   display: block;
+}
+
+.mp-columns {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.mp-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .lyric-line {
@@ -82,6 +97,15 @@ input[type="file"] {
 .gameplay .quit-btn,
 #quit-btn {
   margin-top: 0.5rem;
+}
+
+.results-entry {
+  margin-bottom: 1rem;
+}
+
+.results-entry-heading {
+  font-weight: bold;
+  margin-bottom: 0.2rem;
 }
 
 .results-stats {
@@ -121,4 +145,28 @@ input[type="file"] {
 .settings input[type="number"] {
   width: 5rem;
   margin-left: 0.4rem;
+}
+
+.key-binding-group {
+  margin-bottom: 0.8rem;
+}
+
+.key-binding-group h3 {
+  margin-bottom: 0.3rem;
+}
+
+.key-binding-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.key-binding-label {
+  width: 9rem;
+}
+
+.key-binding-value {
+  width: 14rem;
+  font-family: monospace;
 }
