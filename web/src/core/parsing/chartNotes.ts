@@ -8,6 +8,7 @@
 
 import type { Midi } from "@tonejs/midi";
 import { STAR_POWER_MARKER_NOTE, getForceMarkerNote, getGemIndexForDifficulty, getTapMarkerNote } from "./parser.ts";
+import { GameInstrument } from "./types.ts";
 import type { ChartNote, Difficult } from "./types.ts";
 
 type MidiNote = Midi["tracks"][number]["notes"][number];
@@ -59,15 +60,31 @@ function spanIndexContaining(ticks: number, spans: readonly MarkerSpan[]): numbe
  * `trackIndex` is `Part.index` from `readChartMetadata` — a 0-based index
  * into `midi.tracks` (see the note on `readChartMetadata` for why it's
  * 0-based here rather than the C# original's 1-based `Part.Index`).
+ *
+ * `instrument` (Etapa 6.4) is optional and only changes behavior for
+ * `GameInstrument.Drums`: HOPO/tap are guitar/bass-only concepts that don't
+ * exist on a drum kit, so both are forced to `false` instead of running the
+ * natural-HOPO/force/tap-marker logic below — checked against the bundled
+ * Joan Jett chart's real drum track, its notes are packed densely enough
+ * (different pad, within the natural-HOPO tick threshold) that leaving that
+ * logic on would wrongly auto-hit roughly half of them via
+ * `isAutoHitEligible`. Sustain is likewise forced to 0: a drum chart's notes
+ * carry a short fixed note-off duration that's a MIDI authoring artifact,
+ * not a "hold this pad" instruction — drums have no sustain mechanic (see
+ * docs/web-port-plan.md, Etapa 6.4).
  */
-export function extractChartNotes(midi: Midi, trackIndex: number, difficult: Difficult): ChartNote[] {
+export function extractChartNotes(midi: Midi, trackIndex: number, difficult: Difficult, instrument?: GameInstrument): ChartNote[] {
   const track = midi.tracks[trackIndex];
   if (!track) return [];
 
-  const forceSpans = collectMarkerSpans(track.notes, getForceMarkerNote(difficult));
-  const tapSpans = collectMarkerSpans(track.notes, getTapMarkerNote(difficult));
+  const isDrums = instrument === GameInstrument.Drums;
+
+  const forceSpans = isDrums ? [] : collectMarkerSpans(track.notes, getForceMarkerNote(difficult));
+  const tapSpans = isDrums ? [] : collectMarkerSpans(track.notes, getTapMarkerNote(difficult));
   // Not per-difficulty (see `STAR_POWER_MARKER_NOTE`'s doc comment), and
-  // sorted so a span's index is a stable, chart-order phrase id.
+  // sorted so a span's index is a stable, chart-order phrase id. Kept for
+  // drums too — a drum track's own star power phrases are real and judged
+  // the same way as any other instrument's.
   const starPowerSpans = collectMarkerSpans(track.notes, STAR_POWER_MARKER_NOTE).sort(
     (a, b) => a.startTicks - b.startTicks,
   );
@@ -88,15 +105,17 @@ export function extractChartNotes(midi: Midi, trackIndex: number, difficult: Dif
     // same difficulty) and a different fret. An explicit force marker
     // flips whatever this comes out to, rather than replacing it outright —
     // charts use it to override specific natural-HOPO/natural-strum notes,
-    // not to blanket-declare a section.
-    const naturalHopo = previous !== null && previous.fret !== fret && note.ticks - previous.note.ticks <= thresholdTicks;
-    const isHopo = isWithinAnySpan(note.ticks, forceSpans) ? !naturalHopo : naturalHopo;
-    const isTap = isWithinAnySpan(note.ticks, tapSpans);
+    // not to blanket-declare a section. Skipped entirely for drums (see this
+    // function's doc comment).
+    const naturalHopo =
+      !isDrums && previous !== null && previous.fret !== fret && note.ticks - previous.note.ticks <= thresholdTicks;
+    const isHopo = isDrums ? false : isWithinAnySpan(note.ticks, forceSpans) ? !naturalHopo : naturalHopo;
+    const isTap = isDrums ? false : isWithinAnySpan(note.ticks, tapSpans);
 
     notes.push({
       timeMs: note.time * 1000,
       fret,
-      sustainMs: note.duration * 1000,
+      sustainMs: isDrums ? 0 : note.duration * 1000,
       isHopo,
       isTap,
       starPowerPhraseId: spanIndexContaining(note.ticks, starPowerSpans),

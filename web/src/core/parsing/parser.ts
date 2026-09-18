@@ -88,6 +88,27 @@ export function getTapMarkerNote(difficult: Difficult): number {
  */
 export const STAR_POWER_MARKER_NOTE = 116;
 
+/**
+ * Etapa 6.4: for `GameInstrument.Drums`, fret index 4 (the same slot every
+ * other instrument's 5th/"orange" gem occupies) is the kick/bass pedal by
+ * convention — Clone Hero/FoF drum charts reuse the exact same per-
+ * difficulty gem note ranges as guitar/bass (`GEMS_BY_DIFFICULTY`), there's
+ * no separate MIDI note range for drums. Exported so `ui/noteHighway.ts` can
+ * special-case the pedal's rendering without hardcoding the index in more
+ * than one place.
+ */
+export const DRUM_PEDAL_FRET_INDEX = 4;
+
+/**
+ * Etapa 6.5: `PART VOCALS`' phrase-boundary marker notes — Rock Band/Clone
+ * Hero vocal charts bracket each sung line ("phrase") with a note on one of
+ * these two, alternating between lines, the same span convention as
+ * `STAR_POWER_MARKER_NOTE` but for lyric-line grouping instead of overdrive.
+ * Checked against every bundled vocal chart's real MIDI (see
+ * docs/web-port-plan.md, Etapa 6.5) — both notes are used, alternating.
+ */
+export const VOCAL_PHRASE_MARKER_NOTES: readonly number[] = [105, 106];
+
 export interface GemLookup {
   index: number;
   difficult: Difficult;

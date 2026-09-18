@@ -68,6 +68,17 @@ input[type="file"] {
   display: block;
 }
 
+.lyric-line {
+  font-size: 1.4rem;
+  min-height: 2rem;
+  text-align: center;
+  max-width: 700px;
+}
+
+.lyric-active {
+  color: #f5d033;
+}
+
 .gameplay .quit-btn,
 #quit-btn {
   margin-top: 0.5rem;

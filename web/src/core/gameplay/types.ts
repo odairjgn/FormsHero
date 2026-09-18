@@ -5,7 +5,7 @@
 // against a note's timing, so these types have no `GHCore` counterpart to
 // port from.
 
-import type { ChartNote } from "../parsing/types.ts";
+import type { ChartNote, VocalNote } from "../parsing/types.ts";
 
 /** Named timing precision tiers, tightest first — the classic Guitar
  * Hero/Clone Hero "Perfect/Good/Ok" windows the plan calls for. Doesn't
@@ -149,4 +149,39 @@ export interface GameplayEngineOptions {
   /** Etapa 6.2: how fast the star power meter drains, per second of song
    * time, once activated — see `DEFAULT_STAR_POWER_DRAIN_PER_SECOND`. */
   readonly starPowerDrainPerSecond?: number;
+}
+
+/**
+ * Etapa 6.5's vocal counterpart to `JudgedNote`. Only ever uses `Pending`/
+ * `Hit`/`Missed` of `NoteRuntimeState` — the sustain-specific states
+ * (`Holding`/`SustainCompleted`/`SustainBroken`) are a fret's discrete-
+ * keypress-then-hold concept that doesn't apply to a continuously-judged
+ * sung pitch (see `core/gameplay/vocalEngine.ts`).
+ */
+export interface VocalJudgedNote extends VocalNote {
+  readonly id: number;
+  state: NoteRuntimeState;
+  /** Running fraction (0-1) of this note's judged window sung in tune (or,
+   * for a percussion note, simply voiced at all) — accumulates while
+   * `Pending`; what `state`'s `Hit`/`Missed` resolution is based on once the
+   * window closes (see `VocalGameplayEngineOptions.hitRatioThreshold`). */
+  hitRatio: number;
+}
+
+export interface VocalGameplayEngineOptions {
+  /** How close (in semitones) a detected pitch must be to a note's target
+   * to count as "in tune" this frame — see `DEFAULT_VOCAL_TOLERANCE_SEMITONES`. */
+  readonly toleranceSemitones?: number;
+  /** Fraction of a note's judged window that must be in tune/voiced for it
+   * to resolve as a hit — see `DEFAULT_VOCAL_HIT_RATIO_THRESHOLD`. */
+  readonly hitRatioThreshold?: number;
+  readonly basePointsPerNote?: number;
+  readonly comboMultiplierThresholds?: readonly number[];
+  readonly rockMeterStartValue?: number;
+  readonly rockMeterGainPerHit?: number;
+  readonly rockMeterLossPerMiss?: number;
+  /** Same "practice/debug toggle" as `GameplayEngineOptions.godMode` —
+   * `GameplayStats.failed` never flips to `true` even as the rock meter
+   * keeps moving. */
+  readonly godMode?: boolean;
 }

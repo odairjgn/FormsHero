@@ -4,6 +4,8 @@
 
 export { parseIni, type IniData } from "./ini.ts";
 export {
+  DRUM_PEDAL_FRET_INDEX,
+  VOCAL_PHRASE_MARKER_NOTES,
   getGemIndex,
   getGemIndexForDifficulty,
   getTrackNamesByInstrument,
@@ -12,6 +14,7 @@ export {
 } from "./parser.ts";
 export { readChartMetadata } from "./chartMetadata.ts";
 export { extractChartNotes } from "./chartNotes.ts";
+export { extractVocalNotes } from "./vocalNotes.ts";
 export {
   buildSongLibrary,
   getPlayableMidiFile,
@@ -22,4 +25,4 @@ export {
   type SongFolderNode,
   type SongLibraryEntry,
 } from "./songLibrary.ts";
-export { Difficult, GameInstrument, type ChartNote, type Part } from "./types.ts";
+export { Difficult, GameInstrument, type ChartNote, type Part, type VocalNote } from "./types.ts";

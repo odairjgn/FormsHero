@@ -4,7 +4,7 @@ import { Midi } from "@tonejs/midi";
 import { describe, expect, it } from "vitest";
 import { extractChartNotes } from "./chartNotes.ts";
 import { MUSICA_DIR, SONG_DIRS } from "./musicaFixtures.ts";
-import { Difficult } from "./types.ts";
+import { Difficult, GameInstrument } from "./types.ts";
 
 describe("extractChartNotes — synthetic chart", () => {
   it("keeps only notes matching the requested difficulty's gem range, converted to ms", () => {
@@ -195,6 +195,69 @@ describe("extractChartNotes — star power markers (Etapa 6.2)", () => {
     const notes = extractChartNotes(midi, 0, Difficult.Hard);
 
     expect(notes[0].starPowerPhraseId).toBe(0);
+  });
+});
+
+describe("extractChartNotes — drums (Etapa 6.4)", () => {
+  it("forces sustainMs to 0 even when the underlying MIDI note has a duration", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 96, time: 1, duration: 0.25 }); // Expert fret 0
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert, GameInstrument.Drums);
+
+    expect(notes).toEqual([
+      { timeMs: 1000, fret: 0, sustainMs: 0, isHopo: false, isTap: false, starPowerPhraseId: null },
+    ]);
+  });
+
+  it("never marks a note as a natural HOPO, unlike the same notes on guitar/bass", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 96, time: 0, duration: 0 }); // fret 0
+    track.addNote({ midi: 97, time: midi.header.ticksToSeconds(10), duration: 0 }); // fret 1, well within the natural-HOPO threshold
+
+    const guitarNotes = extractChartNotes(midi, 0, Difficult.Expert, GameInstrument.Guitar);
+    const drumNotes = extractChartNotes(midi, 0, Difficult.Expert, GameInstrument.Drums);
+
+    expect(guitarNotes[1]).toMatchObject({ isHopo: true });
+    expect(drumNotes[1]).toMatchObject({ isHopo: false });
+  });
+
+  it("ignores force/tap markers instead of applying them as HOPO/tap flags", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 96, time: 0, duration: 0 });
+    track.addNote({ midi: 97, time: 1, duration: 0 }); // far from the previous note
+    track.addNote({ midi: 101, time: 1, duration: 0.01 }); // Expert force marker
+    track.addNote({ midi: 102, time: 1, duration: 0.01 }); // Expert tap marker (same span)
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert, GameInstrument.Drums);
+
+    expect(notes[1]).toMatchObject({ isHopo: false, isTap: false });
+  });
+
+  it("still assigns star power phrase ids, same as any other instrument", () => {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    track.addNote({ midi: 116, time: 0, duration: 1 }); // SP span: [0s, 1s]
+    track.addNote({ midi: 96, time: 0.5, duration: 0 });
+
+    const notes = extractChartNotes(midi, 0, Difficult.Expert, GameInstrument.Drums);
+
+    expect(notes[0].starPowerPhraseId).toBe(0);
+  });
+
+  it("extracts the real drum chart with fret-4 (pedal) notes and zeroed sustains, and no false HOPOs", () => {
+    const midi = new Midi(readFileSync(join(MUSICA_DIR, SONG_DIRS.joanJett, "notes.mid")));
+    const drumsTrackIndex = midi.tracks.findIndex((t) => t.name === "PART DRUMS");
+
+    const notes = extractChartNotes(midi, drumsTrackIndex, Difficult.Expert, GameInstrument.Drums);
+
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.every((n) => n.sustainMs === 0)).toBe(true);
+    expect(notes.every((n) => !n.isHopo && !n.isTap)).toBe(true);
+    expect(notes.some((n) => n.fret === 4)).toBe(true); // real kick pedal hits present
   });
 });
 

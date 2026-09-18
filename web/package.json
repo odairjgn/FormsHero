@@ -16,6 +16,7 @@
     "vitest": "^5.0.1"
   },
   "dependencies": {
-    "@tonejs/midi": "^2.0.28"
+    "@tonejs/midi": "^2.0.28",
+    "midi-file": "^1.2.2"
   }
 }

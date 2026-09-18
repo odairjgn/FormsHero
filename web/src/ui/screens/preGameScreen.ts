@@ -4,7 +4,7 @@
 // plan calls for a real pre-game step instead (see docs/web-port-plan.md,
 // Etapa 4).
 
-import { Difficult } from "../../core/parsing/index.ts";
+import { Difficult, GameInstrument } from "../../core/parsing/index.ts";
 import type { Part, Song } from "../../core/parsing/index.ts";
 import type { HighScoreEntry } from "../../core/settings/index.ts";
 import { escapeHtml, songDisplayTitle } from "./formatting.ts";
@@ -38,7 +38,7 @@ export function renderPreGameScreen(
         <select id="part-select"></select>
         <label><input type="checkbox" id="god-mode-check" /> God mode (não perde a música)</label>
         <p id="high-score" class="status"></p>
-        <p>Teclas: D F J K L (verde / vermelho / amarelo / azul / laranja)</p>
+        <p id="keys-hint"></p>
         <button id="start-btn" type="button">Iniciar jogo</button>
       `
           : `<p class="status">Esta música não tem faixa de guitarra/baixo jogável.</p>`
@@ -52,11 +52,17 @@ export function renderPreGameScreen(
   const partSelect = container.querySelector<HTMLSelectElement>("#part-select")!;
   const godModeCheck = container.querySelector<HTMLInputElement>("#god-mode-check")!;
   const highScoreEl = container.querySelector<HTMLParagraphElement>("#high-score")!;
+  const keysHintEl = container.querySelector<HTMLParagraphElement>("#keys-hint")!;
   for (const part of parts) {
     for (const difficult of part.availableDifficulties) {
       const option = document.createElement("option");
       option.value = `${part.index}:${difficult}`;
-      option.textContent = `${part.instrument} — ${difficult}`;
+      // Etapa 6.5: vocals has no real per-difficulty tiers (see
+      // `chartMetadata.ts`'s `availableDifficultiesFor` — `Expert` is a
+      // pseudo-value standing in for "the only difficulty it has"), so its
+      // label skips the "— Expert" suffix that would otherwise be misleading.
+      option.textContent =
+        part.instrument === GameInstrument.Vocals ? part.instrument : `${part.instrument} — ${difficult}`;
       partSelect.appendChild(option);
     }
   }
@@ -75,8 +81,27 @@ export function renderPreGameScreen(
       : "Sem recorde ainda.";
   }
 
-  partSelect.addEventListener("change", renderHighScore);
+  /** Etapa 6.4/6.5: the input hint depends on the selected instrument —
+   * drums swap the guitar/bass frets' 5th key (`KeyL`) for the kick pedal on
+   * Space (see `DEFAULT_DRUM_KEY_CODES`), and vocals uses the microphone
+   * instead of the keyboard entirely. */
+  function renderKeysHint(): void {
+    const selected = selectedPart();
+    if (selected?.part.instrument === GameInstrument.Drums) {
+      keysHintEl.textContent = "Teclas: D F J K (pads: vermelho / amarelo / azul / verde) + barra de espaço (pedal)";
+    } else if (selected?.part.instrument === GameInstrument.Vocals) {
+      keysHintEl.textContent = "Cante no microfone — o jogo vai pedir permissão de acesso a ele.";
+    } else {
+      keysHintEl.textContent = "Teclas: D F J K L (verde / vermelho / amarelo / azul / laranja)";
+    }
+  }
+
+  partSelect.addEventListener("change", () => {
+    renderHighScore();
+    renderKeysHint();
+  });
   renderHighScore();
+  renderKeysHint();
 
   container.querySelector<HTMLButtonElement>("#start-btn")!.addEventListener("click", () => {
     const selected = selectedPart();

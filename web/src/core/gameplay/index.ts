@@ -4,6 +4,13 @@
 
 export { GameplayEngine } from "./gameplayEngine.ts";
 export { DEFAULT_HIT_WINDOWS_MS, classifyTiming } from "./judgment.ts";
+export { VocalGameplayEngine } from "./vocalEngine.ts";
+export {
+  DEFAULT_VOCAL_HIT_RATIO_THRESHOLD,
+  DEFAULT_VOCAL_TOLERANCE_SEMITONES,
+  isInTune,
+  semitoneDistance,
+} from "./vocalJudgment.ts";
 export {
   DEFAULT_BASE_POINTS_PER_NOTE,
   DEFAULT_COMBO_MULTIPLIER_THRESHOLDS,
@@ -32,5 +39,7 @@ export {
   type HitResult,
   type HitWindowsMs,
   type JudgedNote,
+  type VocalGameplayEngineOptions,
+  type VocalJudgedNote,
   type WrongPressResult,
 } from "./types.ts";

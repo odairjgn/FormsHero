@@ -53,9 +53,27 @@ export function readChartMetadata(midi: Midi): Part[] {
       track: track.name,
       instrument,
       index,
-      availableDifficulties: instrument === GameInstrument.None ? [] : difficultiesInTrack(track),
+      availableDifficulties: availableDifficultiesFor(instrument, track),
     };
   });
+}
+
+/**
+ * Etapa 6.5: unlike guitar/bass/drums, `PART VOCALS` has no per-difficulty
+ * tiers in the FoF/Clone Hero/Rock Band format — one sung line, not four
+ * separate charts — so `difficultiesInTrack`'s `GEMS_BY_DIFFICULTY` lookup
+ * (which vocal note numbers never fall into) would always report `[]` for
+ * it, and every other part in `parts` with no difficulties gets filtered out
+ * downstream (see `app.ts`'s `PLAYABLE_INSTRUMENTS` filter). Reporting a
+ * single `Expert` pseudo-tier instead lets Vocals flow through the exact
+ * same `Part`/`Difficult` plumbing (pre-game picker, `extractChartNotes`'s
+ * counterpart `extractVocalNotes`) as every other instrument without any
+ * "no difficulty" special case elsewhere.
+ */
+function availableDifficultiesFor(instrument: GameInstrument, track: Track): Difficult[] {
+  if (instrument === GameInstrument.None) return [];
+  if (instrument === GameInstrument.Vocals) return track.notes.length > 0 ? [Difficult.Expert] : [];
+  return difficultiesInTrack(track);
 }
 
 function guessInstrument(trackName: string): GameInstrument {

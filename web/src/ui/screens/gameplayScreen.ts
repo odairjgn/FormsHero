@@ -8,7 +8,14 @@ import { GameplayEngine } from "../../core/gameplay/index.ts";
 import type { GameplayStats, HitWindowsMs } from "../../core/gameplay/index.ts";
 import type { AudioEngine, AudioLayer } from "../../core/audio/index.ts";
 import type { ChartNote } from "../../core/parsing/index.ts";
-import { HIT_EFFECT_DURATION_MS, NoteHighway, attachKeyboardFretInput } from "../index.ts";
+import {
+  DEFAULT_DRUM_KEY_CODES,
+  DEFAULT_FRET_KEY_CODES,
+  HIT_EFFECT_DURATION_MS,
+  NoteHighway,
+  STAR_POWER_KEY_LABEL,
+  attachKeyboardFretInput,
+} from "../index.ts";
 import type { HitEffect } from "../index.ts";
 
 export interface GameplayScreenOptions {
@@ -28,6 +35,11 @@ export interface GameplayScreenOptions {
   /** God mode: forwarded straight to `GameplayEngineOptions.godMode` — the
    * rock meter keeps moving for the HUD, but `onFailed` never fires. */
   readonly godMode?: boolean;
+  /** Etapa 6.4: true for a `GameInstrument.Drums` playthrough — switches the
+   * keyboard bindings to `DEFAULT_DRUM_KEY_CODES` (pedal on Space) and tells
+   * the highway to draw the pedal fret as a full-width bar instead of a
+   * per-lane gem. */
+  readonly isDrums?: boolean;
   onFinished(stats: GameplayStats): void;
   /** Etapa 6.3: called instead of `onFinished` once the rock meter bottoms
    * out (`stats.failed`) — the song stops early rather than playing to the
@@ -43,7 +55,8 @@ export interface GameplayScreenOptions {
  * way (e.g. a hard reset) — calling it twice is safe either way.
  */
 export function startGameplayScreen(container: HTMLElement, options: GameplayScreenOptions): () => void {
-  const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, godMode, onFinished, onFailed, onQuit } = options;
+  const { audioEngine, notes, instrumentLayer, hitWindowsMs, scrollPxPerMs, godMode, isDrums, onFinished, onFailed, onQuit } =
+    options;
   const inputOffsetMs = options.inputOffsetMs ?? 0;
 
   container.innerHTML = `
@@ -59,7 +72,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
   const quitBtn = container.querySelector<HTMLButtonElement>("#quit-btn")!;
 
   const gameplayEngine = new GameplayEngine(notes, { hitWindowsMs, godMode });
-  const noteHighway = new NoteHighway(canvasEl, { scrollPxPerMs });
+  const noteHighway = new NoteHighway(canvasEl, { scrollPxPerMs, isDrums });
   let hitEffects: HitEffect[] = [];
   let rafHandle = 0;
   let done = false;
@@ -98,7 +111,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
     onActivateStarPower: () => {
       gameplayEngine.activateStarPower();
     },
-  });
+  }, isDrums ? DEFAULT_DRUM_KEY_CODES : DEFAULT_FRET_KEY_CODES);
 
   function renderHud(stats: GameplayStats): void {
     const accuracyPct = (stats.accuracy * 100).toFixed(1);
@@ -109,7 +122,7 @@ export function startGameplayScreen(container: HTMLElement, options: GameplayScr
       `Score: ${stats.score} | Combo: ${stats.combo} (recorde ${stats.longestCombo}) | ` +
       `Multiplicador: x${stats.multiplier} | Acerto: ${accuracyPct}% (${stats.notesHit}/${stats.notesTotal}) | ` +
       `Erros: ${stats.notesMissed + stats.wrongPresses} | Energia: ${stats.rockMeter}% | ` +
-      `Star Power: ${starPowerText} (espaço p/ ativar)` +
+      `Star Power: ${starPowerText} (${STAR_POWER_KEY_LABEL} p/ ativar)` +
       (godMode ? " | GOD MODE" : "");
   }
 

@@ -173,50 +173,156 @@ referência dos pontos de integração abaixo): `core/parsing` (Etapa 1), `core/
   (bloco "GameplayEngine — rock meter (Etapa 6.3)": sobe em hit, desce em miss e
   wrong press, `failed` após sequência de misses, valores customizados).
 
-#### 6.4 — Bateria (pads sem sustain)
-- **O que é**: instrumento jogável novo, `GameInstrument.Drums` (já existe no enum
-  em `core/parsing/types.ts`, só não é tratado como jogável ainda). Pads sem sustain
-  (toque instantâneo), tipicamente 4-5 pads (kick + 4 tambores/pratos no mapeamento
-  Clone Hero).
-- **Onde mexe**: `core/parsing/parser.ts` — a extração de notas por dificuldade já
-  cobre `Drums` (mesma lógica de `GetGemIndex`/gemas por faixa MIDI), então
-  `chartNotes.ts` deve funcionar sem mudança estrutural grande, mas sustains sempre
-  0 para bateria (o parsing pode simplesmente ignorar `sustainMs` na extração para
-  esse instrumento, ou o gameplay engine tratar bateria como "sempre sustainMs=0").
-  `core/gameplay/gameplayEngine.ts`/`judgment.ts` precisam de um modo "sem sustain"
-  (pular os estados `Holding`/`SustainCompleted`/`SustainBroken` do `NoteRuntimeState`
-  para esse instrumento). `ui/noteHighway.ts` precisa de um layout alternativo (pads
-  em vez de barras longas — mesma ideia de trilha, sem desenhar corpo de sustain).
-  `ui/keyboardInput.ts`/`preGameScreen.ts` precisam listar `Drums` como opção
-  selecionável (hoje o `preGameScreen` já itera `parts` genericamente, então deve
-  bastar `songSelectScreen`/filtragem de `parts` não excluir mais `Drums` — checar
-  onde isso é filtrado hoje, se for).
+#### 6.4 — Bateria (pads sem sustain) — ✅ feito
+- **O que é**: instrumento jogável novo, `GameInstrument.Drums`. Pads sem sustain
+  (toque instantâneo); a 5ª gema (fret index 4, "laranja") é o pedal de kick/bumbo,
+  convencionalmente desenhado como um travessão horizontal cruzando toda a highway
+  em vez de um gem numa lane, já que o pedal não pertence a nenhuma lane específica.
+- **Como foi implementado**: `core/parsing/parser.ts` ganhou `DRUM_PEDAL_FRET_INDEX`
+  (4) — Clone Hero/FoF reusa exatamente os mesmos ranges de nota MIDI por
+  dificuldade da guitarra para bateria (`GEMS_BY_DIFFICULTY`), o pedal é uma
+  convenção de índice, não uma nota MIDI separada. `core/parsing/chartNotes.ts`
+  (`extractChartNotes`) ganhou um 4º parâmetro opcional `instrument`: quando é
+  `GameInstrument.Drums`, `sustainMs` é forçado a 0 (checado contra o chart real de
+  bateria da Joan Jett: as notas carregam uma duração curta fixa que é artefato de
+  autoria do MIDI, não uma instrução de segurar) e `isHopo`/`isTap` são sempre
+  `false` — checagem contra esse mesmo chart real mostrou que, sem essa supressão,
+  a regra de HOPO natural marcaria ~metade das notas de bateria (pads diferentes,
+  próximos no tempo) como HOPO, fazendo `isAutoHitEligible` acertá-las sozinho sem
+  nenhuma tecla pressionada. Star power continua sendo extraído normalmente para
+  bateria (fases próprias, mesma lógica de qualquer outro instrumento). Como
+  `sustainMs` sempre 0 já faz `gameplayEngine.ts` pular os estados
+  `Holding`/`SustainCompleted`/`SustainBroken` (a checagem existente é
+  `note.sustainMs > 0`), **nenhuma mudança foi necessária no motor de gameplay** —
+  o "modo sem sustain" sai de graça da extração. `ui/noteHighway.ts` ganhou a opção
+  `isDrums`: com ela, o fret `DRUM_PEDAL_FRET_INDEX` é desenhado como uma barra
+  (`drawPedalBar`) cruzando toda a largura do canvas, tanto a nota caindo quanto a
+  linha de acerto (`drawHitLine`) e o efeito de acerto (`drawHitEffects`) — em vez
+  do círculo/diamante e do marcador circular que as outras 4 lanes usam.
+  `ui/keyboardInput.ts` ganhou `DEFAULT_DRUM_KEY_CODES` (D F J K + **Space** pro
+  pedal) — e, por conflito de tecla com o pedal, `DEFAULT_STAR_POWER_KEY_CODE`
+  mudou de Space para **Shift esquerdo** (`STAR_POWER_KEY_LABEL` exportado junto,
+  usado no HUD). `app.ts` inclui `GameInstrument.Drums` em `PLAYABLE_INSTRUMENTS` e
+  mapeia pra `AudioLayer.Drums`; `ui/screens/gameplayScreen.ts` e
+  `ui/screens/preGameScreen.ts` propagam `isDrums`/mostram a dica de teclas correta
+  por instrumento selecionado.
 - **Depende de**: nada além do motor atual.
-- **Teste**: `chartNotes.test.ts` com uma música real de `musica/` que tenha `PART DRUMS`;
-  `judgment.test.ts` cobrindo o modo sem sustain.
+- **Teste**: `chartNotes.test.ts` (bloco "extractChartNotes — drums (Etapa 6.4)":
+  `sustainMs` zerado mesmo com duração no MIDI, HOPO natural nunca marcado
+  [comparado lado a lado com guitarra nas mesmas notas], marcadores de força/tap
+  ignorados, star power ainda atribuído, e o chart real de bateria da Joan Jett —
+  sustains todos zerados, nenhum HOPO/tap, pedal presente). `ui/noteHighway.ts` e
+  `ui/keyboardInput.ts` seguem sem teste automatizado (Canvas/DOM real, mesma
+  observação do cabeçalho de `noteHighway.ts`) — verificado manualmente com uma
+  página de playtest descartável (não commitada): pedal como travessão cruzando a
+  highway (nota e linha de acerto), D/F/J/K/Space disparando os frets 0-4 e Shift
+  esquerdo disparando `onActivateStarPower`.
 
-#### 6.5 — Vocal (pitch via microfone)
-- **O que é**: captura de áudio do microfone (`getUserMedia` + `AnalyserNode`/`AudioWorklet`
-  para detecção de pitch), comparado contra as notas de `PART VOCALS` do chart
-  (`LyricEvent` para letra na tela, `NoteOnEvent`/`NoteOffEvent` com nota < 100 para
-  afinação — mesma leitura que `Form1._midiPlayer_MessageDispached` faz no C#, ver
-  CLAUDE.md).
-- **Onde mexe**: novo módulo `core/audio/pitchDetection.ts` (ex.: autocorrelação ou
-  YIN sobre o buffer do `AnalyserNode`) — **não existe equivalente no C#** (lá,
-  vocal só toca no MIDI-out, não julga pitch do jogador; é gameplay novo, como o
-  motor da Etapa 3 foi). Novo `core/parsing` para extrair `{ timeMs, durationMs, pitch, lyric }[]`
-  de `PART VOCALS` (hoje `chartNotes.ts` só extrai gemas de guitarra/baixo por
-  faixa MIDI fixa — vocal não usa o mesmo range de nota). Novo módulo de julgamento
-  de afinação em `core/gameplay` (janela de tolerância em semitons, não em ms como
-  as gemas). UI nova: barra de pitch + letra rolando (equivalente web do `VocalView`
-  do C#).
-- **Depende de**: permissão de microfone do navegador (tratar negação/indisponibilidade
-  com fallback gracioso — sem gameplay de vocal, não travar a tela). Maior item do
-  backlog em escopo; vale quebrar em sub-tarefas próprias quando for a vez.
-- **Teste**: detecção de pitch é difícil de testar deterministicamente com Vitest puro;
-  considerar fixtures de áudio gravado com pitch conhecido, ou isolar a lógica de
-  comparação nota-esperada-vs-pitch-detectado (essa parte é pura e testável) do
-  código de captura de microfone (esse não é).
+#### 6.5 — Vocal (pitch via microfone) — ✅ feito
+- **O que é**: captura de áudio do microfone, comparada contra as notas de
+  `PART VOCALS` do chart (letra na tela + afinação) — gameplay novo, sem
+  equivalente no C# (lá vocal só toca no MIDI-out, nunca julga o pitch do
+  jogador — ver CLAUDE.md sobre `UserControls.MidiOut`).
+- **Como foi implementado**: checado empiricamente contra o `notes.mid` das 8
+  músicas de `musica/` (scripts descartáveis, não commitados) antes de
+  decidir o parsing.
+  - **Parsing** (`core/parsing/vocalNotes.ts`, `extractVocalNotes`): o
+    `@tonejs/midi` usado em todo o resto do projeto nunca expõe os eventos de
+    letra (`lyrics`/`text`) de uma track que não seja a primeira (conferido
+    no código-fonte da própria lib) — foi preciso um segundo parse, cru, com
+    `midi-file` (dependência transitiva do `@tonejs/midi`, promovida a
+    dependência direta em `package.json`), casado pela **track já
+    parseada pelo `@tonejs/midi`** por nome (não por índice — evita a
+    pegadinha de offset da conductor track já documentada em
+    `chartMetadata.ts`), e a conversão tick->ms reaproveita
+    `midi.header.ticksToSeconds` para não introduzir um segundo relógio.
+    Convenção real confirmada nas 8 músicas: cada sílaba é uma nota
+    (`noteOn`/`noteOff`) pareada 1-para-1, em ordem cronológica, com um
+    evento `lyrics` (contagem idêntica em todas as 8 músicas) — sufixo `#`
+    marca sílaba de percussão/"talkie" (pitch `null`, sempre nota MIDI 36
+    nas músicas testadas, mas o parser usa o sufixo da letra como sinal
+    autoritativo, não o número da nota, para não quebrar em outros packs
+    Clone Hero/FoF); sufixo `-`/`=` marca palavra continuando na próxima
+    sílaba (`joinsNext`); texto exatamente `"+"` marca "mesma palavra, pitch
+    novo, sem sílaba nova pra mostrar" (`lyric: ""`). Fases de linha
+    ("phrase") são lidas dos marcadores alternados nota 105/106
+    (`VOCAL_PHRASE_MARKER_NOTES` em `parser.ts`), mesmo padrão de span usado
+    por `STAR_POWER_MARKER_NOTE`. `chartMetadata.ts` ganhou um caso especial
+    (`availableDifficultiesFor`): vocal não tem os 4 níveis de dificuldade do
+    formato FoF/Clone Hero (uma linha só), então é reportado como um único
+    pseudo-nível `Expert` — deixa `Part`/`Difficult` fluir pelo mesmo
+    pipeline de pre-game picker sem um caso "sem dificuldade" espalhado pelo
+    resto do código.
+  - **Detecção de pitch** (`core/audio/pitchDetection.ts`, DOM-free e
+    testável com Vitest puro): autocorrelação normalizada por diferença
+    absoluta (a técnica clássica de afinadores no navegador, sem FFT),
+    com busca de lag limitada por `DEFAULT_MIN_HZ`/`DEFAULT_MAX_HZ` (evita
+    tanto erro de oitava quanto busca desnecessária) e refinamento
+    sub-amostral por interpolação parabólica em torno do lag vencedor.
+    `hzToMidi`/`midiToHz` fazem a conversão pra semitons (A4/MIDI 69 =
+    440Hz). `core/audio/micPitchSource.ts` (`MicPitchSource`, não testado —
+    mesma razão de `createAudioEngine.ts`) faz a ponte com o mundo real:
+    `getUserMedia` (com echo cancellation/noise suppression/AGC desligados —
+    todos distorcem a forma de onda periódica de que a autocorrelação
+    depende) + `AnalyserNode`, interface *pull*
+    (`getCurrentPitchHz()` chamado uma vez por frame, mesmo padrão de
+    `AudioEngine.currentTime`/`GameplayEngine.update()`).
+  - **Julgamento** (`core/gameplay/vocalJudgment.ts` + `vocalEngine.ts`):
+    tolerância em semitons (`DEFAULT_VOCAL_TOLERANCE_SEMITONES = 2`), não em
+    ms como as gemas — `isInTune` compara a distância em semitons entre o
+    pitch detectado e o alvo da nota. `VocalGameplayEngine` é um motor
+    paralelo ao `GameplayEngine` (não compartilha código — julgamento
+    contínuo por pitch, não por keypress discreto): cada `update(songTimeMs,
+    detectedPitchHz)` acumula, por nota ativa, a fração do tempo cantada
+    afinada (`hitRatio`, 0-1); a nota resolve `Hit`/`Missed` quando sua
+    janela de julgamento termina (`max(durationMs, 120ms)` — o piso evita
+    que uma sílaba curtíssima feche antes de sequer um frame de
+    `requestAnimationFrame` cair dentro dela) e `hitRatio` cruzou
+    `DEFAULT_VOCAL_HIT_RATIO_THRESHOLD` (50% — julgamento contínuo não tem
+    o mesmo "tudo ou nada" de uma janela de ms). Nota de percussão
+    (`pitch: null`) é julgada só por "teve voz" (qualquer pitch detectado),
+    não por afinação. Em vez de inventar uma estrutura de stats paralela,
+    `getStats()` devolve o mesmo `GameplayStats` de qualquer outro
+    instrumento (`multiplier`/combo reaproveitados, `wrongPresses` sempre 0,
+    `starPower` sempre inativo — não é um mecanismo vocal nesta etapa), o
+    que faz `resultsScreen.ts`/`core/settings/highScores.ts`/`app.ts` (tela
+    de resultado, recorde, "jogar de novo") funcionarem sem nenhuma mudança.
+  - **UI**: `ui/vocalHighway.ts` (`VocalHighway`, não testado — desenha em
+    `CanvasRenderingContext2D` real, mesmo motivo de `noteHighway.ts`) é o
+    equivalente vocal da note highway: tempo rola da direita pra uma linha
+    "agora" fixa à esquerda (como as gemas), mas o eixo vertical é *pitch*,
+    não uma lane de trasto — nota de percussão ganha uma faixa própria
+    embaixo, já que não tem pitch pra plotar. O pitch detectado ao vivo
+    aparece como um marcador na linha "agora". `ui/screens/vocalGameplayScreen.ts`
+    (`startVocalGameplayScreen`) é a contraparte de `gameplayScreen.ts`:
+    pede permissão de microfone primeiro (`MicPitchSource.start()`) e, se
+    negada/indisponível, mostra erro com botão de voltar em vez de travar a
+    tela (não há um "modo sem gameplay" degradado — sem microfone não tem o
+    que julgar); a letra rolando é HTML simples (não canvas), agrupada por
+    `phraseId` com a sílaba atual em destaque, juntando sílabas por
+    `joinsNext` (sem espaço) igual à convenção do chart.
+  - **Wiring**: `app.ts` guarda os bytes crus do MIDI (`LoadedSong.midiBytes`)
+    além do `Midi` já parseado, e `showGameplay` bifurca pra
+    `showVocalGameplay` quando `part.instrument === GameInstrument.Vocals`
+    (motor/tela completamente diferentes — não dava pra só trocar uma opção
+    no `GameplayScreenOptions` existente). `preGameScreen.ts` ganhou dois
+    ajustes pequenos: o rótulo do seletor omite "— Expert" para vocal (é um
+    pseudo-nível, mostrar a palavra seria enganoso) e a dica de input mostra
+    "cante no microfone" em vez do hint de teclas.
+- **Depende de**: permissão de microfone do navegador — tratada com fallback
+  gracioso (mensagem + botão de voltar), não trava a tela.
+- **Teste**: `vocalNotes.test.ts` (marcadores `#`/`-`/`=`/`+` sintéticos +
+  agrupamento de fase + exclusão dos marcadores de fase/star power da lista
+  de sílabas + as 8 músicas reais de `musica/`, contagem de sílabas exata
+  batendo com o MIDI cru). `pitchDetection.test.ts` (ondas senoidais
+  sintéticas em três registros vocais, silêncio, ruído, `hzToMidi`/`midiToHz`
+  ida-e-volta — tudo puro, sem microfone real, confirmando a antecipação do
+  plano original: "isolar a lógica... do código de captura de microfone").
+  `vocalJudgment.test.ts` (`semitoneDistance`/`isInTune`, tolerância padrão e
+  customizada). `vocalEngine.test.ts` (fluxo de frames simulados: nota
+  afinada/desafinada/nunca cantada, nota de percussão por voz vs. silêncio,
+  piso de janela mínima pra sílaba curta, combo/score/rock meter/god
+  mode/accuracy — mesmo padrão de `gameplayEngine.test.ts`).
 
 #### 6.6 — Multiplayer local (2 instrumentos)
 - **O que é**: dois jogadores simultâneos (ex. guitarra + baixo) na mesma tela,

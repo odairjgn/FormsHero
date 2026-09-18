@@ -12,6 +12,7 @@ import type { GameplayStats } from "./core/gameplay/index.ts";
 import {
   GameInstrument,
   extractChartNotes,
+  extractVocalNotes,
   getPlayableMidiFile,
   readChartMetadata,
   readSong,
@@ -25,23 +26,36 @@ import {
   renderSettingsScreen,
   renderSongSelectScreen,
   startGameplayScreen,
+  startVocalGameplayScreen,
 } from "./ui/index.ts";
 import { escapeHtml } from "./ui/screens/formatting.ts";
 
-// MVP scope per the plan: guitar/bass only.
-const PLAYABLE_INSTRUMENTS: readonly GameInstrument[] = [GameInstrument.Guitar, GameInstrument.Rhythm_Bass];
+// MVP scope was guitar/bass only; Etapa 6.4 adds drums, Etapa 6.5 adds
+// vocals (judged completely differently — see `showGameplay`'s branch — but
+// still selectable from the same pre-game instrument/difficulty picker).
+const PLAYABLE_INSTRUMENTS: readonly GameInstrument[] = [
+  GameInstrument.Guitar,
+  GameInstrument.Rhythm_Bass,
+  GameInstrument.Drums,
+  GameInstrument.Vocals,
+];
 
 /** Which `AudioLayer` a played instrument's stem lives on — so a miss can
  * mute the *instrument's own* track, Guitar Hero-style, without touching
- * the backing `Song`/`Drums` layers. */
+ * the backing `Song`/other instrument layers. */
 const AUDIO_LAYER_BY_INSTRUMENT: Partial<Record<GameInstrument, AudioLayer>> = {
   [GameInstrument.Guitar]: AudioLayer.Guitar,
   [GameInstrument.Rhythm_Bass]: AudioLayer.Rhythm,
+  [GameInstrument.Drums]: AudioLayer.Drums,
 };
 
 interface LoadedSong {
   readonly song: Song;
   readonly midi: Midi;
+  /** The exact bytes `midi` was parsed from — re-read by `extractVocalNotes`
+   * for `PART VOCALS`' lyric text (see its header comment for why a second,
+   * raw pass over the same bytes is needed at all). */
+  readonly midiBytes: ArrayBuffer;
   readonly parts: Part[];
   readonly audioEngine: AudioEngine;
 }
@@ -96,12 +110,13 @@ export function startApp(container: HTMLElement): void {
       const song = await readSong(entry);
       const audioEngine = await loadAudioEngineForSong(ensureAudioContext(), song);
 
-      const midi = new Midi(await getPlayableMidiFile(song).arrayBuffer());
+      const midiBytes = await getPlayableMidiFile(song).arrayBuffer();
+      const midi = new Midi(midiBytes);
       const parts = readChartMetadata(midi).filter(
         (part) => PLAYABLE_INSTRUMENTS.includes(part.instrument) && part.availableDifficulties.length > 0,
       );
 
-      showPreGame({ song, midi, parts, audioEngine });
+      showPreGame({ song, midi, midiBytes, parts, audioEngine });
     } catch (err) {
       renderLoadError((err as Error).message);
     }
@@ -135,7 +150,18 @@ export function startApp(container: HTMLElement): void {
 
   function showGameplay(loaded: LoadedSong, part: Part, difficult: Difficult, godMode: boolean): void {
     lastGodMode = godMode;
-    const notes = extractChartNotes(loaded.midi, part.index, difficult);
+
+    // Etapa 6.5: vocals is judged by continuous pitch match, not a fret
+    // keypress stream, so it runs an entirely different engine/screen — see
+    // `extractVocalNotes`/`VocalGameplayEngine`/`startVocalGameplayScreen`'s
+    // header comments for why this can't share `extractChartNotes`/
+    // `GameplayEngine`/`startGameplayScreen`.
+    if (part.instrument === GameInstrument.Vocals) {
+      showVocalGameplay(loaded, part, difficult, godMode);
+      return;
+    }
+
+    const notes = extractChartNotes(loaded.midi, part.index, difficult, part.instrument);
     stopActiveGameplay = startGameplayScreen(container, {
       audioEngine: loaded.audioEngine,
       notes,
@@ -143,6 +169,29 @@ export function startApp(container: HTMLElement): void {
       hitWindowsMs: settings.hitWindowsMs,
       scrollPxPerMs: settings.scrollPxPerMs,
       inputOffsetMs: settings.calibrationOffsetMs,
+      godMode,
+      isDrums: part.instrument === GameInstrument.Drums,
+      onFinished: (stats) => {
+        stopActiveGameplay = null;
+        showResults(loaded, part, difficult, stats, false);
+      },
+      onFailed: (stats) => {
+        stopActiveGameplay = null;
+        showResults(loaded, part, difficult, stats, true);
+      },
+      onQuit: () => {
+        stopActiveGameplay = null;
+        showPreGame(loaded);
+      },
+    });
+  }
+
+  function showVocalGameplay(loaded: LoadedSong, part: Part, difficult: Difficult, godMode: boolean): void {
+    const notes = extractVocalNotes(loaded.midi, part.index, loaded.midiBytes);
+    stopActiveGameplay = startVocalGameplayScreen(container, {
+      audioContext: ensureAudioContext(),
+      audioEngine: loaded.audioEngine,
+      notes,
       godMode,
       onFinished: (stats) => {
         stopActiveGameplay = null;

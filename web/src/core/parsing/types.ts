@@ -88,3 +88,37 @@ export interface ChartNote {
    * off the MIDI's note-116 marker spans. */
   starPowerPhraseId: number | null;
 }
+
+/**
+ * Etapa 6.5: one sung syllable from `PART VOCALS`, extracted by
+ * `extractVocalNotes` — the vocal equivalent of `ChartNote`, but judged by
+ * pitch match over its duration rather than a single-instant keypress (see
+ * `core/gameplay/vocalEngine.ts`). No C# equivalent: `Form1` only ever
+ * echoed vocal MIDI events to a real synth output, it never judged the
+ * player's own voice (see CLAUDE.md's note on `UserControls.MidiOut`).
+ */
+export interface VocalNote {
+  /** Note start time, in milliseconds from the start of the song. */
+  timeMs: number;
+  /** How long the player should hold this pitch, in milliseconds. */
+  durationMs: number;
+  /** Target MIDI pitch the player should sing, or `null` for a percussion/
+   * "talkie" syllable — a spoken beat judged by voicing alone, no pitch
+   * match required (see `extractVocalNotes` for how this is read off the
+   * chart's "#"-suffixed lyric convention). */
+  pitch: number | null;
+  /** Cleaned syllable text, with the chart's marker suffixes (`#`, trailing
+   * `-`/`=`) stripped — `""` for a pitch-only continuation of the previous
+   * syllable (the chart's lyric was exactly `"+"`, meaning "same word, new
+   * pitch, no new syllable to display"). */
+  lyric: string;
+  /** True if this syllable's word continues into the next one with no space
+   * (the chart's raw lyric ended in `-` or `=`) — e.g. `"dan-"` followed by
+   * `"cin'"` displays as `"dancin'"`. */
+  joinsNext: boolean;
+  /** Which vocal phrase/line (0-based, chart order) this note belongs to, or
+   * `null` outside every phrase — the sung-line grouping a lyric display
+   * scrolls by. See `extractVocalNotes` for how phrases are read off the
+   * chart's alternating phrase-marker note pair. */
+  phraseId: number | null;
+}

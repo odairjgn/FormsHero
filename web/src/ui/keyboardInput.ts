@@ -11,9 +11,28 @@
  */
 export const DEFAULT_FRET_KEY_CODES: readonly string[] = ["KeyD", "KeyF", "KeyJ", "KeyK", "KeyL"];
 
-/** Etapa 6.2's "tecla dedicada" for activating star power — Space, same as
- * the strum-bar-adjacent key classic Guitar Hero/Rock Band use for it. */
-export const DEFAULT_STAR_POWER_KEY_CODE = "Space";
+/** Etapa 6.4's drum bindings: 4 pads on the same left-hand-friendly keys as
+ * the guitar/bass frets, but the 5th slot (`DRUM_PEDAL_FRET_INDEX`, the kick
+ * pedal) is Space instead of `KeyL` — Space is the natural key for a pedal
+ * (a single big "stomp" input, not tied to a specific lane), which is also
+ * why star power's own key had to move off Space (see
+ * `DEFAULT_STAR_POWER_KEY_CODE`). */
+export const DEFAULT_DRUM_KEY_CODES: readonly string[] = ["KeyD", "KeyF", "KeyJ", "KeyK", "Space"];
+
+/** Etapa 6.2's "tecla dedicada" for activating star power. Originally Space
+ * (the classic Guitar Hero/Rock Band choice), moved to Left Shift for Etapa
+ * 6.4: Space is now the kick pedal's key on drums (`DEFAULT_DRUM_KEY_CODES`),
+ * and one physical key can't mean both "activate star power" and "hit the
+ * pedal" without a per-instrument key code, which the rest of this module
+ * doesn't otherwise need. Left Shift is unused by every other binding and
+ * sits right below the guitar/bass frets' `KeyD`, reachable without moving
+ * the hand off them. */
+export const DEFAULT_STAR_POWER_KEY_CODE = "ShiftLeft";
+
+/** Human-readable label for `DEFAULT_STAR_POWER_KEY_CODE`, for on-screen
+ * hints (HUD, pre-game instructions) — kept next to the key code so the two
+ * can't drift apart if it moves again. */
+export const STAR_POWER_KEY_LABEL = "Shift esquerdo";
 
 export interface FretInputHandlers {
   onFretDown(fret: number): void;

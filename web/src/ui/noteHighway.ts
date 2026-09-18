@@ -13,6 +13,7 @@
 
 import { NoteRuntimeState } from "../core/gameplay/types.ts";
 import type { JudgedNote } from "../core/gameplay/types.ts";
+import { DRUM_PEDAL_FRET_INDEX } from "../core/parsing/index.ts";
 
 /** Same 5 fret colors as `GameNeck.CreateFret` (green/red/yellow/blue/orange). */
 export const FRET_COLORS: readonly string[] = ["#3ecf3e", "#e2483d", "#f5d033", "#3d7ce2", "#f2933d"];
@@ -21,6 +22,12 @@ export interface NoteHighwayOptions {
   /** Pixels the highway scrolls per millisecond of song time — the plan's
    * "velocidade de scroll configurável". */
   readonly scrollPxPerMs?: number;
+  /** Etapa 6.4: drums mode. When true, the note at `DRUM_PEDAL_FRET_INDEX`
+   * (the kick pedal) is drawn as a horizontal bar/"travessão" spanning the
+   * full highway width instead of a per-lane gem — the classic Rock
+   * Band/Clone Hero convention for a pedal note, since a kick isn't tied to
+   * any one lane the way a hand pad is. */
+  readonly isDrums?: boolean;
 }
 
 /** A "hit" moment on one fret, keyed by when it happened on the
@@ -35,6 +42,10 @@ export interface HitEffect {
 }
 
 const NOTE_RADIUS = 18;
+/** Etapa 6.4: thickness (px) of the kick pedal's full-width bar — comparable
+ * to a regular note's diameter (`NOTE_RADIUS * 2`) so it reads at a similar
+ * visual weight, just shaped as a bar instead of a circle. */
+const PEDAL_BAR_HEIGHT = 20;
 const DEFAULT_SCROLL_PX_PER_MS = 0.4;
 /** Extra time (ms) a fully-played sustain tail stays on screen before
  * `render()` stops bothering to draw it at all. */
@@ -64,6 +75,7 @@ export class NoteHighway {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly scrollPxPerMs: number;
+  private readonly isDrums: boolean;
 
   constructor(canvas: HTMLCanvasElement, options: NoteHighwayOptions = {}) {
     const ctx = canvas.getContext("2d");
@@ -71,6 +83,7 @@ export class NoteHighway {
     this.canvas = canvas;
     this.ctx = ctx;
     this.scrollPxPerMs = options.scrollPxPerMs ?? DEFAULT_SCROLL_PX_PER_MS;
+    this.isDrums = options.isDrums ?? false;
   }
 
   /**
@@ -147,8 +160,20 @@ export class NoteHighway {
   }
 
   private drawHitLine(laneWidth: number, hitLineY: number): void {
-    const { ctx } = this;
+    const { ctx, canvas } = this;
     for (let fret = 0; fret < FRET_COLORS.length; fret++) {
+      if (this.isDrums && fret === DRUM_PEDAL_FRET_INDEX) {
+        // Pedal's own hit marker: a full-width band, matching the bar shape
+        // its falling notes use (see `drawPedalBar`) instead of a per-lane
+        // circle.
+        const bandHalfHeight = NOTE_RADIUS + 6;
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        ctx.fillRect(0, hitLineY - bandHalfHeight, canvas.width, bandHalfHeight * 2);
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(0, hitLineY - bandHalfHeight, canvas.width, bandHalfHeight * 2);
+        continue;
+      }
+
       const cx = laneWidth * (fret + 0.5);
       ctx.beginPath();
       ctx.arc(cx, hitLineY, NOTE_RADIUS + 6, 0, Math.PI * 2);
@@ -166,7 +191,7 @@ export class NoteHighway {
    * playtesting found too subtle to read a hit from at a glance.
    */
   private drawHitEffects(hitEffects: readonly HitEffect[], laneWidth: number, hitLineY: number): void {
-    const { ctx } = this;
+    const { ctx, canvas } = this;
     const now = performance.now();
 
     for (const effect of hitEffects) {
@@ -174,7 +199,7 @@ export class NoteHighway {
       if (ageMs < 0 || ageMs > HIT_EFFECT_DURATION_MS) continue;
 
       const t = ageMs / HIT_EFFECT_DURATION_MS; // 0 (just hit) -> 1 (fully faded)
-      const cx = laneWidth * (effect.fret + 0.5);
+      const cx = this.isDrums && effect.fret === DRUM_PEDAL_FRET_INDEX ? canvas.width / 2 : laneWidth * (effect.fret + 0.5);
 
       ctx.beginPath();
       ctx.arc(cx, hitLineY, NOTE_RADIUS + t * 45, 0, Math.PI * 2);
@@ -197,8 +222,9 @@ export class NoteHighway {
   }
 
   private drawNote(note: JudgedNote, laneWidth: number, hitLineY: number, songTimeMs: number): void {
-    const { ctx } = this;
-    const cx = laneWidth * (note.fret + 0.5);
+    const { ctx, canvas } = this;
+    const isPedal = this.isDrums && note.fret === DRUM_PEDAL_FRET_INDEX;
+    const cx = isPedal ? canvas.width / 2 : laneWidth * (note.fret + 0.5);
     const color = FRET_COLORS[note.fret];
     const isDimmed = note.state === NoteRuntimeState.Missed || note.state === NoteRuntimeState.SustainBroken;
     const wasJudged =
@@ -206,6 +232,10 @@ export class NoteHighway {
       note.state === NoteRuntimeState.Holding ||
       note.state === NoteRuntimeState.SustainCompleted;
 
+    // Drums never carry a sustain (`extractChartNotes` forces `sustainMs` to
+    // 0 for `GameInstrument.Drums` — see its doc comment), so this branch is
+    // dead for a pedal note in practice; left as-is rather than special-
+    // cased since the guard already makes it a no-op.
     if (note.sustainMs > 0) {
       const headY = Math.min(this.timeToY(note.timeMs, songTimeMs, hitLineY), hitLineY);
       const tailY = Math.min(this.timeToY(note.timeMs + note.sustainMs, songTimeMs, hitLineY), hitLineY);
@@ -216,18 +246,42 @@ export class NoteHighway {
     if (wasJudged) return; // already crossed the hit line — nothing left to draw for the head itself
 
     const headY = this.timeToY(note.timeMs, songTimeMs, hitLineY);
-    this.drawNoteHead(cx, headY, isDimmed ? "#555555" : color, isDimmed, note.isHopo, note.isTap);
+    if (isPedal) {
+      this.drawPedalBar(headY, isDimmed ? "#555555" : color);
+    } else {
+      this.drawNoteHead(cx, headY, isDimmed ? "#555555" : color, isDimmed, note.isHopo, note.isTap);
+    }
 
-    // Etapa 6.2: a thin gold ring marks which notes belong to a star power
-    // phrase — the only way to tell, at a glance, which notes to nail to
-    // fill the bar (missing even one fails that whole phrase's chunk).
+    // Etapa 6.2: a thin gold ring (or, for a pedal bar, an outline of the
+    // same shape) marks which notes belong to a star power phrase — the
+    // only way to tell, at a glance, which notes to nail to fill the bar
+    // (missing even one fails that whole phrase's chunk).
     if (!isDimmed && note.starPowerPhraseId !== null) {
-      ctx.beginPath();
-      ctx.arc(cx, headY, NOTE_RADIUS + 5, 0, Math.PI * 2);
       ctx.lineWidth = 2;
       ctx.strokeStyle = "rgba(255, 210, 80, 0.9)";
-      ctx.stroke();
+      if (isPedal) {
+        const barHalfHeight = PEDAL_BAR_HEIGHT / 2 + 4;
+        ctx.strokeRect(2, headY - barHalfHeight, canvas.width - 4, barHalfHeight * 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(cx, headY, NOTE_RADIUS + 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
+  }
+
+  /** Etapa 6.4's pedal note shape — a horizontal bar/"travessão" spanning
+   * the full highway width, the classic Rock Band/Clone Hero convention:
+   * a kick isn't struck in any one lane, so it isn't drawn confined to one
+   * either. */
+  private drawPedalBar(y: number, color: string): void {
+    const { ctx, canvas } = this;
+    const top = y - PEDAL_BAR_HEIGHT / 2;
+    ctx.fillStyle = color;
+    ctx.fillRect(0, top, canvas.width, PEDAL_BAR_HEIGHT);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "black";
+    ctx.strokeRect(0, top, canvas.width, PEDAL_BAR_HEIGHT);
   }
 
   /**
